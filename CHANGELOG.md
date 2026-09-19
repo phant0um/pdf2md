@@ -9,10 +9,11 @@ Versioning follows [SemVer](https://semver.org/).
 
 - **Ligaduras tipográficas (fl, fi, ff...) viravam U+FFFD na conversão** (MÉDIA):
   o engine de layout do pymupdf4llm mapeia glifos de ligadura para U+FFFD quando
-  a fonte embutida não traz ToUnicode ("Workflow" → "Work\ufffdow", "reflect" →
-  "re\ufffdect"). Reparo por dicionário do próprio documento: `page.get_text()` como
-  referência, substituição 1-para-1, sem adivinhação. Limitação: FFFD de fonte
-  matemática (Σ, ∫) não tem referência no texto cru e continua avisado.
+  a fonte embutida não traz ToUnicode — "Workflow" saía como "Work�ow" e
+  "reflect" como "re�ect". Reparo por dicionário do próprio documento:
+  `page.get_text()` como referência, substituição 1-para-1, sem adivinhação.
+  Limitação: FFFD de fonte matemática (Σ, ∫) não tem referência no texto cru e
+  continua avisado.
 - **OCR interno do pymupdf4llm duplicava trabalho** (~40% do tempo de extração):
   `use_ocr=False` quando o engine de layout está ativo. O projeto já tem OCR
   próprio controlado por `ModoImagem`.
