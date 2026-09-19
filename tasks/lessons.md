@@ -43,6 +43,7 @@
 
 ## Processo (Maestro)
 
+- `[2026-09-19] FAILURE` **Teste cujo input foi alterado para casar com a implementação não prova nada.** Quando o código diverge da spec, validar a premissa contra o dado real antes de reescrever o algoritmo. Três rodadas: v1 com ``Work�own`` (input que não existe em PDF), v2 com algoritmo complexo que truncava plural, hedge `or len(md) > 20` que neutralizava a assertion. Mutation testing é o gate final.
 - `[2026-05-29] FAILURE` **Gate pulado com auto-avaliação**: Gate 2 do Ciclo 2 declarado "score estimado ≥85" sem evidência → 15 bugs (3 críticos) shippados. Gate exige evidência real.
 - `[2026-05-29] DECISION` **Code-review max-effort** (5 finders + verify + sweep) é gate pré-release obrigatório, não faxina posterior. ROI comprovado: 15/15 bugs capturados.
 - `[2026-05-29] DECISION` **Nova dep externa via subprocess** → `grep subprocess.run core/` + comparação com resolvers existentes antes de empacotar.

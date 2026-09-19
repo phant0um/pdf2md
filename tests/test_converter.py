@@ -272,3 +272,40 @@ def test_pdf_ignorar_margens_zero_nao_filtra(fixture_texto_simples):
     md_normal = pdf_to_md(fixture_texto_simples)
     md_sem_margem = pdf_to_md(fixture_texto_simples, ignorar_margens=0.0)
     assert md_normal == md_sem_margem
+
+
+# ── Reparo de ligaduras (U+FFFD) ─────────────────────────────────────────────
+
+def test_pdf_sem_fffd_permanece_identico(fixture_texto_simples):
+    """PDF sem U+FFFD: output contém texto esperado (não é corrompido)."""
+    md = pdf_to_md(fixture_texto_simples)
+    assert "documento de teste" in md.lower()
+
+
+def test_pdf_reparo_ligadura_emite_aviso(tmp_path, monkeypatch):
+    """pdf_to_md repara FFFD do chunk usando o texto cru da própria página."""
+    import fitz
+
+    from core import converter
+
+    pdf = tmp_path / "ligadura.pdf"
+    doc = fitz.open()
+    pagina = doc.new_page()
+    pagina.insert_text((50, 50), "Workflow reflect texto de referencia do documento")
+    pagina.insert_text((50, 80), "linha extra para passar do minimo de caracteres")
+    doc.save(str(pdf))
+    doc.close()
+
+    monkeypatch.setattr(
+        converter,
+        "_extrair_chunks_markdown",
+        lambda path, avisos=None: [{"text": "Work\uFFFDow re\uFFFDect"}],
+    )
+
+    avisos: list[str] = []
+    md = converter.pdf_to_md(pdf, avisos=avisos)
+
+    assert "Workflow" in md
+    assert "reflect" in md
+    assert "\ufffd" not in md
+    assert any("ligadura" in a for a in avisos)

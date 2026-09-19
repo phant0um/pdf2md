@@ -7,6 +7,7 @@ from core.quality import (
     aplicar_pipeline_qualidade,
     corrigir_mojibake,
     limpar_artefatos,
+    reparar_ligaduras,
     validar_qualidade,
 )
 
@@ -171,6 +172,108 @@ def test_detecta_soft_hyphens_residuais(tmp_path):
     md = ("palavra­ " * 10) + "texto normal"
     avisos = validar_qualidade(md, f)
     assert any("hifen" in a.lower() or "00AD" in a or "suave" in a.lower() for a in avisos)
+
+
+# ── reparar_ligaduras ───────────────────────────────────────────────────────
+
+def test_repara_com_dicionario():
+    """Repara 'fl' quando a palavra resultante existe no dicionário."""
+    resultado, n = reparar_ligaduras("Work\uFFFDow", "Workflow data")
+    assert resultado == "Workflow"
+    assert n == 1
+
+
+def test_repara_ligadura_fi():
+    """Repara 'fi' (classi\u200bcation → classification)."""
+    resultado, n = reparar_ligaduras("classi\uFFFDcation", "classification")
+    assert resultado == "classification"
+    assert n == 1
+
+
+def test_repara_ligadura_ff():
+    """Repara 'ff' (di\u200bfferent → different)."""
+    resultado, n = reparar_ligaduras("di\uFFFDerent", "different approach")
+    assert resultado == "different"
+    assert n == 1
+
+
+def test_nao_trunca_plural():
+    """P0: plural não é truncado — Work\uFFFDows sem 'workflow' na ref fica intacto."""
+    resultado, n = reparar_ligaduras("Work\uFFFDows", "workflow")
+    assert resultado == "Work\uFFFDows"
+    assert n == 0
+
+
+def test_nao_trunca_flexao():
+    """P0: flexão não é truncada — re\uFFFDected sem 'reflected' na ref fica intacto."""
+    resultado, n = reparar_ligaduras("re\uFFFDected", "only reflect here")
+    assert resultado == "re\uFFFDected"
+    assert n == 0
+
+
+def test_repara_flexao_quando_ref_tem():
+    """Repara flexão quando a ref tem a palavra exata."""
+    resultado, n = reparar_ligaduras("re\uFFFDected", "reflect and reflected")
+    assert resultado == "reflected"
+    assert n == 1
+
+
+def test_preserva_sem_match():
+    """Mantém U+FFFD quando nenhum candidato existe na referência."""
+    resultado, n = reparar_ligaduras("Xyz\uFFFDabc", "nada a ver")
+    assert resultado == "Xyz\uFFFDabc"
+    assert n == 0
+
+
+def test_nao_toca_token_curto():
+    """Token com menos de 2 letras reais não é reparado (ex: [\ufffd])."""
+    resultado, n = reparar_ligaduras("[\uFFFD]", "fl fi texto qualquer")
+    assert resultado == "[\uFFFD]"
+    assert n == 0
+
+
+def test_noop_sem_fffd():
+    """Texto sem U+FFFD retorna inalterado."""
+    resultado, n = reparar_ligaduras("texto limpo", "referência")
+    assert resultado == "texto limpo"
+    assert n == 0
+
+
+def test_noop_referencia_vazia():
+    """Referência vazia: retorna inalterado."""
+    resultado, n = reparar_ligaduras("Work\uFFFDow", "")
+    assert resultado == "Work\uFFFDow"
+    assert n == 0
+
+
+def test_caixa_alta():
+    """Token todo maiúsculo recebe ligadura em maiúscula."""
+    resultado, n = reparar_ligaduras("WORK\uFFFDOW", "workflow")
+    assert resultado == "WORKFLOW"
+    assert n == 1
+
+
+def test_caixa_mista_preservada():
+    """Caixa mista: Re\uFFFDect → Reflect (primeira maiúscula preservada)."""
+    resultado, n = reparar_ligaduras("Re\uFFFDect", "reflect")
+    assert resultado == "Reflect"
+    assert n == 1
+
+
+def test_acento_preservado():
+    """Acento PT-BR no token não é corrompido pelo reparo."""
+    resultado, n = reparar_ligaduras("Work\uFFFDow e ação", "Workflow e ação")
+    assert "ação" in resultado
+    assert "Workflow" in resultado
+    assert n == 1
+
+
+def test_multiplos_tokens():
+    """Múltiplos tokens com U+FFFD no mesmo texto: repara todos."""
+    resultado, n = reparar_ligaduras("Work\uFFFDow e re\uFFFDect", "Workflow reflect")
+    assert "Workflow" in resultado
+    assert "reflect" in resultado
+    assert n == 2
 
 
 # ── Integração: pipeline completo ────────────────────────────────────────────

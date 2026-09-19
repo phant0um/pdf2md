@@ -8,6 +8,8 @@ Dois estágios aplicados a todo output antes de salvar:
        • Hifens suaves (U+00AD) — causam quebra de palavras em PDFs hifenizados
        • Chars de largura zero (U+200B/C/D, U+FEFF mid-string) — deslocam letras
        • Espaços não-quebráveis (U+00A0) → espaço normal
+       • Ligaduras perdidas (U+FFFD de glifo fl/fi/ff sem ToUnicode) —
+         reparadas contra o texto cru do próprio PDF (só no caminho PDF)
 
   2. VALIDAÇÃO — detecta problemas que a limpeza não pode corrigir sozinha e
      retorna lista de avisos para exibição no CLI e GUI:
@@ -68,6 +70,23 @@ _MOJIBAKE_PARA: dict[str, str] = dict(_MOJIBAKE)
 _MIN_KB_AVISO_CURTO = 10
 _MIN_CHARS_AVISO_CURTO = 100
 _MAX_SOFT_HYPHENS = 5
+
+# Ligaduras tipográficas candidatas ao reparo de U+FFFD.
+# A aceitação exige match no dicionário do documento, então a ordem só
+# desempata ambiguidade genuína (ex.: "�ies" → "flies" vs "fies").
+_LIGADURAS = ("fl", "fi", "ff", "ffi", "ffl", "ft", "st")
+
+# Token alfanumérico contendo pelo menos um U+FFFD. [^\W_] = letra/dígito
+# Unicode sem underscore — preserva acentuação PT-BR no token.
+_TOKEN_FFFD_RE = re.compile(r"[^\W_]*�[^\W_]*")
+
+# Mínimo de letras reais no token para tentar reparo. Abaixo disso o token
+# não carrega contexto suficiente (ex.: "[�]" de fonte matemática) e
+# qualquer candidato casaria com o dicionário por acidente.
+_MIN_LETRAS_REPARO = 2
+
+# Extrai palavras do texto de referência para montar o dicionário do documento.
+_PALAVRA_RE = re.compile(r"[^\W_]+")
 
 # Tabela de tradução compilada para limpar_artefatos — 1 passada str.translate
 # (antes: 6× str.replace = 6 travessias O(n) do texto inteiro).
@@ -146,6 +165,67 @@ def limpar_artefatos(texto: str) -> str:
     texto = "\n".join(linhas)
 
     return texto
+
+
+# ── 1c. Reparo de ligaduras perdidas (U+FFFD) ───────────────────────────────
+
+def reparar_ligaduras(md: str, referencia: str) -> tuple[str, int]:
+    """
+    Repara U+FFFD originado de glifo de ligadura (fl, fi, ff...) não mapeado.
+
+    Motivo: o engine de layout do pymupdf4llm devolve U+FFFD para glifos de
+    ligadura em PDFs cuja fonte não traz ToUnicode ("Work\ufffdow", "re\ufffdect"),
+    enquanto o `page.get_text()` clássico do PyMuPDF resolve o mesmo glifo
+    corretamente. Usamos esse texto cru como DICIONÁRIO DO PRÓPRIO DOCUMENTO —
+    nunca adivinhamos a expansão.
+
+    O U+FFFD substitui a ligadura inteira, 1-para-1: "Work\ufffdow" vira
+    "Workflow" por substituição direta. Um candidato só é aceito se a palavra
+    resultante existir, inteira, no dicionário. Token sem candidato válido fica
+    INTACTO e continua disparando o aviso de validar_qualidade — nunca é
+    truncado nem aproximado.
+
+    Limitação conhecida: o dicionário é por-documento. Palavra cuja grafia
+    correta só aparece dentro de região de imagem não tem referência no texto
+    cru e não é reparada.
+
+    Args:
+        md: Markdown extraído, possivelmente com U+FFFD.
+        referencia: Texto cru do mesmo documento (fonte da verdade).
+
+    Returns:
+        (md_reparado, n_tokens_reparados)
+    """
+    if "\ufffd" not in md or not referencia:
+        return md, 0
+
+    dicionario = {p.lower() for p in _PALAVRA_RE.findall(referencia)}
+    if not dicionario:
+        return md, 0
+
+    n_total = 0
+
+    def _reparar(m: re.Match[str]) -> str:
+        nonlocal n_total
+        token = m.group(0)
+        letras = token.replace("\ufffd", "")
+        if len(letras) < _MIN_LETRAS_REPARO:
+            return token
+
+        # Token todo em caixa alta recebe ligadura em caixa alta:
+        # "WORK\ufffdOW" → "WORKFLOW", nunca "WORKflOW".
+        caixa_alta = letras.isupper()
+
+        for ligadura in _LIGADURAS:
+            candidato = token.replace(
+                "\ufffd", ligadura.upper() if caixa_alta else ligadura
+            )
+            if candidato.lower() in dicionario:
+                n_total += 1
+                return candidato
+        return token
+
+    return _TOKEN_FFFD_RE.sub(_reparar, md), n_total
 
 
 # ── 2. Validação ──────────────────────────────────────────────────────────────
