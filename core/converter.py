@@ -3,6 +3,7 @@ Converte arquivos PDF em Markdown.
 Detecta automaticamente páginas com imagem e aplica OCR.
 Feature `--imagens` (PDF-only): extrai imagens embutidas como assets (ADR-0005).
 """
+import importlib.util
 import os
 import tempfile
 from pathlib import Path
@@ -19,6 +20,7 @@ from core.image_converter import (
     ocr_bytes,
 )
 from core.pdf_images import extrair_imagens
+from core.quality import reparar_ligaduras
 from core.utils import (
     _MAX_BYTES_RENDER_PAGINA,
     ModoImagem,
@@ -35,6 +37,20 @@ _OCR_DPI = 300
 # Margem vertical padrão (em % da altura da página) ignorada quando
 # --ignorar-margens está ativo. Cobre cabeçalhos e rodapés comuns.
 _MARGEM_PADRAO_PCT = 5.0
+
+# pymupdf4llm >= 1.27 roda Tesseract por conta própria nas imagens embutidas
+# (use_ocr=True é o default do caminho de layout). O projeto já tem OCR próprio
+# controlado por ModoImagem — o do pymupdf4llm só duplica trabalho (~40% do
+# tempo de extração) e produz texto pior que o embutido.
+#
+# `_use_layout` é privado: se o upstream renomear, caímos na detecção pública
+# do módulo de layout em vez de desligar o fix em silêncio.
+_LAYOUT_ATIVO: bool = getattr(
+    pymupdf4llm,
+    "_use_layout",
+    importlib.util.find_spec("pymupdf.layout") is not None,
+)
+_KWARGS_EXTRACAO: dict[str, Any] = {"use_ocr": False} if _LAYOUT_ATIVO else {}
 
 
 def pdf_to_md(
@@ -110,14 +126,22 @@ def pdf_to_md(
     chunks = _extrair_chunks_markdown(path, avisos_efetivos)
 
     try:
+        bruto: list[str] = []
         partes = [
-            _processar_pagina(doc, num, chunks, ignorar_margens, contexto)
+            _processar_pagina(doc, num, chunks, ignorar_margens, contexto, bruto)
             for num in range(len(doc))
         ]
     finally:
         doc.close()
 
-    return "\n\n".join(partes)
+    md = "\n\n".join(partes)
+    md, n_reparos = reparar_ligaduras(md, "\n".join(bruto))
+    if n_reparos and avisos_efetivos is not None:
+        avisos_efetivos.append(
+            f"{n_reparos} ligadura(s) tipográfica(s) reparada(s) "
+            f"(glifo sem ToUnicode no PDF de origem)"
+        )
+    return md
 
 
 def _extrair_chunks_markdown(path: Path, avisos: list[str] | None = None) -> list[dict[str, Any]]:
@@ -133,7 +157,7 @@ def _extrair_chunks_markdown(path: Path, avisos: list[str] | None = None) -> lis
     podem ser perdidos) para o usuário saber que a saída é degradada.
     """
     try:
-        chunks = pymupdf4llm.to_markdown(str(path), page_chunks=True)
+        chunks = pymupdf4llm.to_markdown(str(path), page_chunks=True, **_KWARGS_EXTRACAO)
         if isinstance(chunks, list):
             return chunks
         _aviso_fallback_pymupdf(avisos)
@@ -158,10 +182,14 @@ def _processar_pagina(
     chunks: list[dict[str, Any]],
     ignorar_margens: float,
     contexto: ContextoAssets | None = None,
+    bruto: list[str] | None = None,
 ) -> str:
     """Extrai conteúdo de uma página: texto nativo (filtrado ou não) ou OCR."""
     pagina = doc.load_page(num_pagina)
     texto_pagina = pagina.get_text()
+
+    if bruto is not None:
+        bruto.append(texto_pagina)
 
     if len(texto_pagina.strip()) >= _MIN_TEXTO_PAGINA:
         if ignorar_margens > 0:
