@@ -63,10 +63,18 @@ modelo e informar API key — decisões travadas aqui:
 - **Entitlements:** o `.app` é **não-sandboxed** (build sem arquivo de
   entitlements) — `com.apple.security.network.client` não se aplica. Se o
   sandbox for adotado no futuro, é obrigatório.
-- **Keychain × assinatura ad-hoc:** itens de Keychain criados por app com
-  signing ad-hoc podem ser invalidados a cada rebuild. Mitigação: service
-  fixo `com.pdf2md.llm` independente do bundle id. Limitação conhecida até
-  adoção de Developer ID estável.
+- **Keychain × assinatura ad-hoc (emenda 2026-09-24):** a ACL do item no
+  login keychain é amarrada à assinatura do app que o criou — com ad-hoc, ao
+  cdhash, que muda a cada rebuild. Resultado: o macOS pedia a senha de login
+  ao abrir o app (agravado por `KeychainHelper.ler()` chamado a cada render do
+  SwiftUI). A mitigação original — service fixo `com.pdf2md.llm` — **não
+  funcionava**: o nome do serviço não participa da ACL. Correção:
+  1. `build_app.sh` assina com identidade estável (`PDF2MD_SIGN_IDENTITY` ou a
+     primeira "Apple Development" válida); o designated requirement não muda
+     entre builds, então "Permitir Sempre" persiste. Ad-hoc só como fallback,
+     com aviso.
+  2. `KeychainHelper.ler()` usa cache em memória — no máximo um acesso ao
+     Keychain por execução.
 
 ## Consequências
 
