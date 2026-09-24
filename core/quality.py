@@ -85,6 +85,14 @@ _TOKEN_FFFD_RE = re.compile(r"[^\W_]*�[^\W_]*")
 # qualquer candidato casaria com o dicionário por acidente.
 _MIN_LETRAS_REPARO = 2
 
+# Letra de TEXTO corrido: letra Unicode exceto grego (U+0370–U+03FF) e
+# alfanuméricos matemáticos (U+1D400–U+1D7FF) — esses são símbolos de fórmula.
+_LETRA_TEXTO = "[^\\W\\d_\u0370-\u03ff\U0001d400-\U0001d7ff]"
+
+# Run de U+FFFD com o caractere vizinho de cada lado (vazio em borda de texto).
+_RUN_FFFD_RE = re.compile(r"(.?)(\ufffd+)(?=(.?))", re.DOTALL)
+_LETRA_TEXTO_RE = re.compile(_LETRA_TEXTO)
+
 # Extrai palavras do texto de referência para montar o dicionário do documento.
 _PALAVRA_RE = re.compile(r"[^\W_]+")
 
@@ -228,6 +236,35 @@ def reparar_ligaduras(md: str, referencia: str) -> tuple[str, int]:
     return _TOKEN_FFFD_RE.sub(_reparar, md), n_total
 
 
+def classificar_fffd(md: str) -> tuple[int, int]:
+    """
+    Conta U+FFFD separando corrupção de palavra de símbolo de fórmula.
+
+    Motivo: fontes TeX sem ToUnicode (ex.: pxfonts) perdem glifos de fórmula
+    (Σ, =) — o texto ao redor está íntegro e o reparo de ligaduras não tem
+    referência para eles. Avisar "texto corrompido" nesse caso é falso alarme.
+
+    Regra: um run de U+FFFD colado (à esquerda ou à direita) em letra de
+    texto corrido conta como palavra corrompida; o resto conta como símbolo.
+    Letras gregas e alfanuméricos matemáticos (𝐽, 𝑗) NÃO são letra de texto.
+
+    Args:
+        md: Markdown já reparado e limpo.
+
+    Returns:
+        (n_em_palavra, n_simbolo)
+    """
+    n_palavra = n_simbolo = 0
+    for m in _RUN_FFFD_RE.finditer(md):
+        run = len(m.group(2))
+        vizinhos = m.group(1) + m.group(3)
+        if _LETRA_TEXTO_RE.search(vizinhos):
+            n_palavra += run
+        else:
+            n_simbolo += run
+    return n_palavra, n_simbolo
+
+
 # ── 2. Validação ──────────────────────────────────────────────────────────────
 
 def validar_qualidade(md: str, origem: Path) -> list[str]:
@@ -263,12 +300,20 @@ def validar_qualidade(md: str, origem: Path) -> list[str]:
             f"mojibake PT-BR residual(is) detectado(s)"
         )
 
-    # 2. Chars de substituição U+FFFD
-    n_fffd = md.count("\ufffd")
-    if n_fffd > 0:
+    # 2. Chars de substituição U+FFFD — separados por contexto: colado em
+    # letra de texto = palavra corrompida; fora de palavra = glifo de fórmula
+    # sem ToUnicode (Σ, =) que o reparo de ligaduras não resolve (ver
+    # classificar_fffd).
+    n_palavra, n_simbolo = classificar_fffd(md)
+    if n_palavra > 0:
         avisos.append(
-            f"{n_fffd} caractere(s) de substituição (U+FFFD) detectado(s) — "
+            f"{n_palavra} caractere(s) de substituição (U+FFFD) detectado(s) — "
             f"texto provavelmente corrompido por problema de encoding"
+        )
+    if n_simbolo > 0:
+        avisos.append(
+            f"{n_simbolo} símbolo(s) sem mapeamento Unicode fora de palavras "
+            f"(provável fórmula: Σ, =) — texto intacto, revise as fórmulas"
         )
 
     # 3. Output muito curto para o tamanho do arquivo
