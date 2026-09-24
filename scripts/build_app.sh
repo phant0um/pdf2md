@@ -6,7 +6,7 @@
 #   1. PyInstaller: core/cli.py → binário one-file `pdf2md`
 #   2. swiftc: gui/PDF2MD/*.swift → executável `PDF2MD` (sem Xcode, só CLT)
 #   3. Monta PDF2MD.app (Info.plist + ícone + binário Python embarcado)
-#   4. Codesign ad-hoc (sem Apple Developer ID — usuário usa "abrir mesmo assim")
+#   4. Codesign com identidade estável (Apple Development); ad-hoc só como fallback
 #   5. hdiutil → PDF2MD-v<versão>.dmg
 #
 # Sem paths hardcoded: tudo derivado do local do script, do pyproject e do
@@ -106,11 +106,33 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# ── 4. Codesign ad-hoc ──────────────────────────────────────────────────────
-# Sem Apple Developer ID: assinatura ad-hoc (-). Gatekeeper exige
-# "clicar com botão direito → Abrir" na primeira execução.
-echo "▶ [4/5] Codesign ad-hoc"
-codesign --force --deep --sign - "${APP}"
+# ── 4. Codesign com identidade estável ─────────────────────────────────────
+# A ACL do item de Keychain (API key do LLM) é amarrada à assinatura do app.
+# Ad-hoc (-) muda a cada build → macOS pede a senha de login ao abrir o app.
+# Identidade estável mantém o designated requirement entre builds, e o
+# "Permitir Sempre" do usuário persiste (ver ADR-0007).
+# Ordem: $PDF2MD_SIGN_IDENTITY → 1ª "Apple Development" válida → ad-hoc.
+# Sem notarização: Gatekeeper ainda exige "botão direito → Abrir" em outra Mac.
+IDENTIDADE="${PDF2MD_SIGN_IDENTITY:-}"
+if [[ -z "${IDENTIDADE}" ]]; then
+    IDENTIDADE="$(security find-identity -v -p codesigning 2>/dev/null \
+        | awk '/"Apple Development:/ {print $2; exit}')"
+fi
+if [[ -n "${IDENTIDADE}" ]]; then
+    echo "▶ [4/5] Codesign (identidade ${IDENTIDADE})"
+    codesign --force --deep --sign "${IDENTIDADE}" "${APP}" || {
+        # errSecInternalComponent = codesign sem acesso à chave privada
+        # (keychain bloqueado ou sessão sem GUI para o diálogo de permissão).
+        echo "✗ codesign falhou. Rode o build num Terminal da sessão gráfica e" >&2
+        echo "  clique \"Permitir Sempre\" no diálogo da chave, ou desbloqueie:" >&2
+        echo "  security unlock-keychain ~/Library/Keychains/login.keychain-db" >&2
+        exit 1
+    }
+else
+    echo "▶ [4/5] Codesign ad-hoc"
+    echo "  ⚠ sem identidade estável: o macOS pedirá a senha do Keychain após cada rebuild" >&2
+    codesign --force --deep --sign - "${APP}"
+fi
 codesign --verify --deep --strict "${APP}" && echo "  ✓ assinatura válida"
 
 # ── 5. DMG ──────────────────────────────────────────────────────────────────
