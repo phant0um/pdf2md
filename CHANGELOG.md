@@ -5,6 +5,64 @@ Versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-24
+
+### Added
+
+- **Presets de LLM: OpenCode Zen** (`https://opencode.ai/zen/v1`), **OpenCode
+  Go** (`https://opencode.ai/zen/go/v1`) e **Ollama Cloud**
+  (`https://ollama.com/v1`) no fallback de qualidade — GUI (picker de
+  provider), docstring de env do CLI e README (#32).
+
+- **DOCX unificado com o PDF (T19):** `doc_to_md` para de embutir base64 por
+  padrão (decisão D2) e passa a respeitar `--imagens` — `extrair` grava
+  assets com **posição preservada** no documento, `ambos` usa OCR como
+  alt-text, `ignorar` descarta. Maquinaria de segurança compartilhada via
+  `core/image_assets.py` (dedup, nomenclatura, limites, symlink).
+  `core/pdf_images.py` fica só com a parte PyMuPDF.
+- **`--imagens transcrever|extrair|ambos|ignorar`** (PDF-only): política de
+  imagens embutidas. `extrair` salva os assets (default `<stem>_assets/`) e
+  linka `![](...)`; `ambos` extrai e usa OCR como alt-text; `ignorar`
+  descarta sem OCR; default `transcrever` é byte-idêntico ao atual.
+  `--assets-dir` sobrescreve o diretório; `--obsidian` usa
+  `vault/attachments/` com wikilinks `![[...]]`.
+- **Segurança de extração** (ADR-0005): nomes sempre gerados (nunca do
+  metadado do PDF), dedup por SHA-256, limites anti resource-bomb (500
+  imagens/documento, 50 MB/imagem), recusa de symlink no assets dir, ext
+  exótica normalizada para PNG.
+- **`core/pdf_images.py`** com 8 testes (extração, dedup, limites, nome
+  hostil, symlink, PDF sem imagem).
+- **ADR-0005**: decisões D1–D5 (destino, base64 rejeitado, render de scan,
+  dedup, nomenclatura).
+- **LLM provider/model picker in the GUI (Settings window)** — fixes the
+  silent no-op of the AI Enhance toggle in the `.app`: `BatchProcessor` now
+  injects `PDF2MD_LLM_URL/MODEL/KEY` into the process environment. Provider
+  presets (Ollama, Gemini, Groq, OpenRouter, custom), live model list and
+  connection status come from the new `pdf2md llm` subcommands; the API key
+  is stored in the macOS Keychain (never in argv — `ps aux` safe).
+- **CLI flags `--llm-url` / `--llm-modelo`** with precedence flag > env >
+  default, propagated `cli → batch → quality → llm_enhancer` via `ConfigLLM`.
+- **`pdf2md llm modelos --json`** — lists models from the endpoint, with
+  vision capability detection for local Ollama (`/api/show`).
+- **`pdf2md llm testar --json`** — uncached connectivity probe with latency
+  measurement; failure returns `{"ok": false}` with exit 0 (JSON is the GUI
+  contract, no traceback).
+- **ADR-0007**: LLM config decisions D6–D10 (Keychain, env injection, SSRF
+  by design, keychain/ad-hoc signing limitation).
+
+### Changed
+
+- **Desempenho do pipeline de qualidade**: `corrigir_mojibake` (~40 travessias
+  O(n) de count+replace) e `limpar_artefatos` (6× replace) agora rodam em
+  1 passada (regex sub + str.translate compilada) (#30).
+- **Tabela do CLI determinística**: resultados em batch seguem a ordem de
+  entrada (antes: ordem de conclusão do ThreadPool, variava entre runs) (#30).
+- **`_linha_tabela_md` extraído** (DRY pptx/xlsx) (#30).
+- **GUI: drop/picker aceitam .docx, .pptx e .xlsx de novo** — o filtro por
+  UTI hardcoded nunca casava com a resolução do LaunchServices (docx →
+  `org.openxmlformats.wordprocessingml.document` sem `officedocument.`);
+  filtro agora é por extensão, espelhando `EXTENSOES_PERMITIDAS` do core (#31).
+
 ### Fixed
 
 - **Aviso falso de "texto corrompido" em PDF com fórmula** (BAIXA): glifo de
@@ -43,6 +101,18 @@ Versioning follows [SemVer](https://semver.org/).
 - **TesseractError mascarado como "arquivo corrompido"** — mensagem real de OCR
   (idioma ausente) agora é exibida (#29).
 
+- **CLI/GUI: o `.app` não convertia (desde v0.4.0).** O CLI exigia o
+  subcomando `converter`, mas a GUI chamava `pdf2md <arquivo> <destino>
+  --json` → "No such command". Default-command no entry point: a forma
+  canônica `pdf2md <origem> [destino] [opções]` agora funciona (a explícita
+  `pdf2md converter ...` continua). Auditado por Grok 4.5 max (C1).
+- **GUI: avisos de qualidade eram descartados** — `atualizarProgresso`
+  não propagava `item.avisos`; o ícone âmbar nunca aparecia (A1).
+- **`--imagens`: crash em `ambos` com GIF/PPM** (ocr_bytes normaliza para
+  PNG); **renders de scan contam no limite anti bomb**; **colisão de stem
+  em dirs de assets compartilhados** (prefixo pelo stem do .md destino) —
+  fixes da Emenda 2 do ADR-0005 (#22/cf9ab44).
+
 ### Security
 
 - **CI: gate detect-secrets era vácuo** — `scan --baseline` auto-atualiza o
@@ -57,25 +127,12 @@ Versioning follows [SemVer](https://semver.org/).
 - **Prompt injection documentado** em SECURITY.md (texto do documento vai ao
   LLM sem isolamento — risco aceito, ADR-0004).
 
-### Changed
-
-- **Desempenho do pipeline de qualidade**: `corrigir_mojibake` (~40 travessias
-  O(n) de count+replace) e `limpar_artefatos` (6× replace) agora rodam em
-  1 passada (regex sub + str.translate compilada) (#30).
-- **Tabela do CLI determinística**: resultados em batch seguem a ordem de
-  entrada (antes: ordem de conclusão do ThreadPool, variava entre runs) (#30).
-- **`_linha_tabela_md` extraído** (DRY pptx/xlsx) (#30).
-- **GUI: drop/picker aceitam .docx, .pptx e .xlsx de novo** — o filtro por
-  UTI hardcoded nunca casava com a resolução do LaunchServices (docx →
-  `org.openxmlformats.wordprocessingml.document` sem `officedocument.`);
-  filtro agora é por extensão, espelhando `EXTENSOES_PERMITIDAS` do core (#31).
-
-### Added
-
-- **Presets de LLM: OpenCode Zen** (`https://opencode.ai/zen/v1`), **OpenCode
-  Go** (`https://opencode.ai/zen/go/v1`) e **Ollama Cloud**
-  (`https://ollama.com/v1`) no fallback de qualidade — GUI (picker de
-  provider), docstring de env do CLI e README (#32).
+- Error messages from `llm modelos`/`llm testar` are sanitized (CWE-209/532):
+  only HTTP code or failure category is exposed, never URL/path/credential.
+- API key is transmitted only via `process.environment` (D8) and the
+  Authorization header — never through argv or JSON output.
+- Image extraction hardening (ADR-0005): path traversal, symlink and
+  resource-bomb mitigations with tests proving each one.
 
 ### Testes
 
@@ -83,69 +140,6 @@ Versioning follows [SemVer](https://semver.org/).
   75→95%, pdf_images 79→100%) (#29, #30).
 - **Teste-fantasma corrigido**: `testar` importado de llm_enhancer fazia
   chamada de rede real a localhost:11434 na suíte — renomeado para `_testar_llm`.
-
-## [0.6.0] — 2026-08-05
-
-### Fixed
-
-- **CLI/GUI: o `.app` não convertia (desde v0.4.0).** O CLI exigia o
-  subcomando `converter`, mas a GUI chamava `pdf2md <arquivo> <destino>
-  --json` → "No such command". Default-command no entry point: a forma
-  canônica `pdf2md <origem> [destino] [opções]` agora funciona (a explícita
-  `pdf2md converter ...` continua). Auditado por Grok 4.5 max (C1).
-- **GUI: avisos de qualidade eram descartados** — `atualizarProgresso`
-  não propagava `item.avisos`; o ícone âmbar nunca aparecia (A1).
-- **`--imagens`: crash em `ambos` com GIF/PPM** (ocr_bytes normaliza para
-  PNG); **renders de scan contam no limite anti bomb**; **colisão de stem
-  em dirs de assets compartilhados** (prefixo pelo stem do .md destino) —
-  fixes da Emenda 2 do ADR-0005 (#22/cf9ab44).
-
-### Added
-
-- **DOCX unificado com o PDF (T19):** `doc_to_md` para de embutir base64 por
-  padrão (decisão D2) e passa a respeitar `--imagens` — `extrair` grava
-  assets com **posição preservada** no documento, `ambos` usa OCR como
-  alt-text, `ignorar` descarta. Maquinaria de segurança compartilhada via
-  `core/image_assets.py` (dedup, nomenclatura, limites, symlink).
-  `core/pdf_images.py` fica só com a parte PyMuPDF.
-- **`--imagens transcrever|extrair|ambos|ignorar`** (PDF-only): política de
-  imagens embutidas. `extrair` salva os assets (default `<stem>_assets/`) e
-  linka `![](...)`; `ambos` extrai e usa OCR como alt-text; `ignorar`
-  descarta sem OCR; default `transcrever` é byte-idêntico ao atual.
-  `--assets-dir` sobrescreve o diretório; `--obsidian` usa
-  `vault/attachments/` com wikilinks `![[...]]`.
-- **Segurança de extração** (ADR-0005): nomes sempre gerados (nunca do
-  metadado do PDF), dedup por SHA-256, limites anti resource-bomb (500
-  imagens/documento, 50 MB/imagem), recusa de symlink no assets dir, ext
-  exótica normalizada para PNG.
-- **`core/pdf_images.py`** com 8 testes (extração, dedup, limites, nome
-  hostil, symlink, PDF sem imagem).
-- **ADR-0005**: decisões D1–D5 (destino, base64 rejeitado, render de scan,
-  dedup, nomenclatura).
-- **LLM provider/model picker in the GUI (Settings window)** — fixes the
-  silent no-op of the AI Enhance toggle in the `.app`: `BatchProcessor` now
-  injects `PDF2MD_LLM_URL/MODEL/KEY` into the process environment. Provider
-  presets (Ollama, Gemini, Groq, OpenRouter, custom), live model list and
-  connection status come from the new `pdf2md llm` subcommands; the API key
-  is stored in the macOS Keychain (never in argv — `ps aux` safe).
-- **CLI flags `--llm-url` / `--llm-modelo`** with precedence flag > env >
-  default, propagated `cli → batch → quality → llm_enhancer` via `ConfigLLM`.
-- **`pdf2md llm modelos --json`** — lists models from the endpoint, with
-  vision capability detection for local Ollama (`/api/show`).
-- **`pdf2md llm testar --json`** — uncached connectivity probe with latency
-  measurement; failure returns `{"ok": false}` with exit 0 (JSON is the GUI
-  contract, no traceback).
-- **ADR-0007**: LLM config decisions D6–D10 (Keychain, env injection, SSRF
-  by design, keychain/ad-hoc signing limitation).
-
-### Security
-
-- Error messages from `llm modelos`/`llm testar` are sanitized (CWE-209/532):
-  only HTTP code or failure category is exposed, never URL/path/credential.
-- API key is transmitted only via `process.environment` (D8) and the
-  Authorization header — never through argv or JSON output.
-- Image extraction hardening (ADR-0005): path traversal, symlink and
-  resource-bomb mitigations with tests proving each one.
 
 ## [0.5.0] — 2026-06-29
 
