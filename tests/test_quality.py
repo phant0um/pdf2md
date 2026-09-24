@@ -137,6 +137,65 @@ def test_detecta_fffd(tmp_path):
     assert any("FFFD" in a or "substituição" in a.lower() for a in avisos)
 
 
+def _aviso_fffd(md, tmp_path):
+    """Helper: avisos de validar_qualidade que mencionam U+FFFD/símbolo."""
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"%PDF" + b"x" * 1000)
+    return validar_qualidade(md, f)
+
+
+def test_fffd_formula_somatorio_nao_e_corrupcao(tmp_path):
+    """Σ sem ToUnicode (arXiv 2502.02533) vira aviso de símbolo, não de encoding."""
+    md = "custo _𝐶_ (1PO) =[\ufffd] _[𝐽] 𝑗_[N (] _[𝑎][𝑗]_[) ×]"
+    avisos = _aviso_fffd(md, tmp_path)
+    assert len(avisos) == 1
+    assert "1 símbolo(s)" in avisos[0]
+    assert "corrompido" not in avisos[0]
+
+
+def test_fffd_isolado_em_legenda_nao_e_corrupcao(tmp_path):
+    """'=' de fonte pxfonts em legenda de gráfico (arXiv 2608.11246)."""
+    md = "Open loop<br>0.2 α α \ufffd \ufffd 1 0 . . 0 95<br>α \ufffd 0.9"
+    avisos = _aviso_fffd(md, tmp_path)
+    assert len(avisos) == 1
+    assert "3 símbolo(s)" in avisos[0]
+    assert "corrompido" not in avisos[0]
+
+
+def test_fffd_colado_em_letra_matematica_e_simbolo(tmp_path):
+    """Vizinho letra matemática/grega (𝑗, α) não conta como palavra de texto."""
+    md = "soma 𝑗\ufffd𝐽 e α\ufffdβ"
+    avisos = _aviso_fffd(md, tmp_path)
+    assert len(avisos) == 1
+    assert "2 símbolo(s)" in avisos[0]
+
+
+def test_fffd_dentro_de_palavra_continua_corrupcao(tmp_path):
+    """Ligadura não reparada (Work\ufffdows) segue como encoding corrompido."""
+    md = "multi-agent Work\ufffdows and caracter\ufffd"
+    avisos = _aviso_fffd(md, tmp_path)
+    assert len(avisos) == 1
+    assert "2 caractere(s) de substituição" in avisos[0]
+    assert "corrompido" in avisos[0]
+
+
+def test_fffd_sequencia_dentro_de_palavra_conta_todos(tmp_path):
+    """Run de U+FFFD colado em palavra conta cada caractere, inclusive o do meio."""
+    md = "a\ufffd\ufffd\ufffdb"
+    avisos = _aviso_fffd(md, tmp_path)
+    assert avisos == [a for a in avisos if "3 caractere(s)" in a]
+    assert len(avisos) == 1
+
+
+def test_fffd_misto_gera_dois_avisos(tmp_path):
+    """Palavra corrompida e símbolo de fórmula no mesmo doc: 2 avisos separados."""
+    md = "re\ufffdect aqui e =[\ufffd] _𝑛 ali"
+    avisos = _aviso_fffd(md, tmp_path)
+    assert len(avisos) == 2
+    assert any("1 caractere(s)" in a and "corrompido" in a for a in avisos)
+    assert any("1 símbolo(s)" in a for a in avisos)
+
+
 def test_detecta_output_muito_curto(tmp_path):
     """Output muito curto para arquivo grande gera aviso."""
     f = tmp_path / "grande.pdf"

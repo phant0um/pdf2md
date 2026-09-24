@@ -7,6 +7,13 @@ Versioning follows [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **Aviso falso de "texto corrompido" em PDF com fórmula** (BAIXA): glifo de
+  fórmula sem ToUnicode (Σ, `=` de fontes TeX como pxfonts) gerava o aviso
+  "texto provavelmente corrompido por problema de encoding", mas as palavras
+  estavam intactas. `classificar_fffd` separa os U+FFFD: colado em letra de
+  texto corrido continua como encoding corrompido; fora de palavra (vizinho
+  de espaço, colchete, letra grega ou letra matemática) vira aviso próprio,
+  "símbolo(s) sem mapeamento Unicode … revise as fórmulas".
 - **Ligaduras tipográficas (fl, fi, ff...) viravam U+FFFD na conversão** (MÉDIA):
   o engine de layout do pymupdf4llm mapeia glifos de ligadura para U+FFFD quando
   a fonte embutida não traz ToUnicode — "Workflow" saía como "Work�ow" e
