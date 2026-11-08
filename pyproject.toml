@@ -1,6 +1,6 @@
 [project]
 name = "pdf2md"
-version = "0.6.0"
+version = "0.6.1"
 description = "Converte PDFs, imagens, Word, PPTX e planilhas em Markdown com suporte a batch e Obsidian vault"
 readme = "README.md"
 requires-python = ">=3.12"
