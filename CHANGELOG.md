@@ -5,6 +5,13 @@ Versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-11-07
+
+### Added
+
+- Marcador `<!-- page: N -->` (1-based) no início do texto de cada página do PDF
+  convertido, para o consumidor citar a página de origem (#38).
+
 ## [0.6.0] — 2026-09-24
 
 ### Added
