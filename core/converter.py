@@ -128,7 +128,10 @@ def pdf_to_md(
     try:
         bruto: list[str] = []
         partes = [
-            _processar_pagina(doc, num, chunks, ignorar_margens, contexto, bruto)
+            _marcar_pagina(
+                num,
+                _processar_pagina(doc, num, chunks, ignorar_margens, contexto, bruto),
+            )
             for num in range(len(doc))
         ]
     finally:
@@ -142,6 +145,18 @@ def pdf_to_md(
             f"(glifo sem ToUnicode no PDF de origem)"
         )
     return md
+
+
+def _marcar_pagina(num_pagina: int, texto: str) -> str:
+    """Prefixa o texto da página com `<!-- page: N -->` (N 1-based).
+
+    Comentário HTML porque o Obsidian e o Markdown renderizam o marcador como
+    invisível: o leitor não vê a linha, mas o número de página fica no arquivo.
+    Índice 1-based porque é o número que o usuário vê no leitor de PDF; o
+    `num_pagina` do PyMuPDF é 0-based e mostraria "página 0" para a capa.
+    Vale também para página vazia: o marcador continua marcando a página.
+    """
+    return f"<!-- page: {num_pagina + 1} -->\n{texto}"
 
 
 def _extrair_chunks_markdown(path: Path, avisos: list[str] | None = None) -> list[dict[str, Any]]:

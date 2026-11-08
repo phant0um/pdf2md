@@ -1,4 +1,5 @@
 """Testes para core/converter.py."""
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -180,7 +181,10 @@ def test_pdf_imagens_ignorar_descarta_sem_ocr(tmp_path, monkeypatch):
 
     md = pdf_to_md(path, modo_imagem=ModoImagem.ignorar)
 
-    assert md.strip() == ""
+    # O marcador de página (`<!-- page: N -->`) sobrevive mesmo com a página
+    # descartada: ele registra a paginação, não o conteúdo. Então "vazio" passa a
+    # significar "sem nada além dos marcadores".
+    assert re.sub(r"<!-- page: \d+ -->\n?", "", md).strip() == ""
     assert chamadas_ocr == []
     assert not (tmp_path / "scan_assets").exists()
 
@@ -309,3 +313,37 @@ def test_pdf_reparo_ligadura_emite_aviso(tmp_path, monkeypatch):
     assert "reflect" in md
     assert "\ufffd" not in md
     assert any("ligadura" in a for a in avisos)
+
+
+def test_pdf_marcador_de_pagina_em_ordem(tmp_path):
+    """Cada página ganha `<!-- page: N -->` (1-based) antes do seu texto, em ordem.
+
+    Sem o marcador o .md final perde o número de página: o leitor não sabe
+    de qual página veio cada trecho. Textos distintos por página provam que
+    o marcador fica colado ao conteúdo certo, não só presente em algum lugar.
+    """
+    path = tmp_path / "tres_paginas.pdf"
+    doc = fitz.open()
+    textos = []
+    for n in range(1, 4):
+        pagina = doc.new_page(width=595, height=842)
+        # Texto > _MIN_TEXTO_PAGINA (50) para cair no caminho de texto nativo, não no OCR
+        texto = f"Conteudo exclusivo da pagina numero {n} para validar o marcador."
+        pagina.insert_text((50, 80), texto)
+        textos.append(texto)
+    doc.save(str(path))
+    doc.close()
+
+    md = pdf_to_md(path)
+
+    marcadores = re.findall(r"<!-- page: (\d+) -->", md)
+    assert marcadores == ["1", "2", "3"]
+
+    # Cada marcador precede o texto da sua própria página e vem antes da próxima
+    posicoes = [md.index(f"<!-- page: {n} -->") for n in (1, 2, 3)]
+    assert posicoes == sorted(posicoes)
+    for n, texto in enumerate(textos, start=1):
+        pos_texto = md.index(texto)
+        assert posicoes[n - 1] < pos_texto
+        if n < 3:
+            assert pos_texto < posicoes[n]
