@@ -28,7 +28,7 @@ from core.image_assets import (
     preparar_assets_dir,
     registrar_asset,
 )
-from core.image_converter import alt_text_enxuto, ocr_bytes
+from core.image_converter import alt_text_enxuto, ocr_bytes, wikilink_imagem
 from core.utils import (  # fonte única da verdade (re-exportado)
     _MAX_BYTES_IMAGEM,
     EXTENSOES_DOC,
@@ -170,7 +170,9 @@ def _docx_para_md(path: Path, contexto: ContextoAssets | None) -> str:
         md = str(resultado.value)
 
         if contexto.wikilinks:
-            md = _converter_wikilinks(md, contexto.coletor)
+            md = _converter_wikilinks(
+                md, contexto.coletor, usar_alt=contexto.modo == ModoImagem.ambos,
+            )
         return md.strip()
     except Exception as exc:
         raise RuntimeError(
@@ -242,18 +244,26 @@ def _montar_handler(contexto: ContextoAssets) -> Callable[[_ImagemMammoth], dict
         if asset is None:
             return {}
 
+        ocr = contexto.modo == ModoImagem.ambos and not asset.duplicado
         if contexto.wikilinks:
-            return {"src": f"{_MARCADOR_WIKILINK}{asset.nome}"}
+            marcador = {"src": f"{_MARCADOR_WIKILINK}{asset.nome}"}
+            if ocr:
+                marcador["alt"] = alt_text_enxuto(ocr_bytes(asset.dados, asset.extensao))
+            return marcador
         src = {"src": os.path.relpath(asset.caminho_disco, contexto.md_dir)}
-        if contexto.modo == ModoImagem.ambos and not asset.duplicado:
+        if ocr:
             src["alt"] = alt_text_enxuto(ocr_bytes(asset.dados, asset.extensao))
         return src
 
     return converter_imagem
 
 
-def _converter_wikilinks(md: str, coletor: ColetorAssets) -> str:
-    """![](...) → ![[...]] apenas para links com o marcador gerado por nós (D1)."""
+def _converter_wikilinks(md: str, coletor: ColetorAssets, usar_alt: bool = False) -> str:
+    """![](...) → ![[...]] apenas para links com o marcador gerado por nós (D1).
+
+    `usar_alt` (modo ambos): o alt do OCR vira alias, `![[nome|texto]]`.
+    Sem ele (extrair) o wikilink sai puro, mesmo que o .docx traga alt próprio.
+    """
     padrao = re.compile(
         rf"!\[([^\]]*)\]\({re.escape(_MARCADOR_WIKILINK)}([^)]*)\)"
     )
@@ -262,7 +272,7 @@ def _converter_wikilinks(md: str, coletor: ColetorAssets) -> str:
     def _sub(m: re.Match[str]) -> str:
         nome = m.group(2)
         if nome in nomes:
-            return f"![[{nome}]]"
+            return wikilink_imagem(nome, m.group(1)) if usar_alt else f"![[{nome}]]"
         return m.group(0)
 
     return padrao.sub(_sub, md)

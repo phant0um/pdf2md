@@ -237,6 +237,40 @@ def test_docx_ambos_ocr_como_alt(tmp_path):
     assert "![TEXTO DA IMAGEM OCR](com_imagem_assets/img_0001.png)" in md
 
 
+def test_docx_ambos_wikilinks_ocr_vira_alias(tmp_path):
+    """ambos + Obsidian: OCR vira alias do embed, exatamente uma vez por imagem."""
+    from unittest.mock import patch
+
+    path = tmp_path / "com_imagem.docx"
+    _criar_docx_com_imagem(path)
+
+    with patch("core.doc_converter.ocr_bytes", return_value="TEXTO DA IMAGEM") as ocr:
+        md = doc_to_md(
+            path, modo_imagem=ModoImagem.ambos, wikilinks=True,
+            assets_dir=tmp_path / "anexos", md_dir=tmp_path,
+        )
+
+    ocr.assert_called_once()
+    assert "![[img_0001.png|TEXTO DA IMAGEM]]" in md
+
+
+def test_docx_extrair_wikilinks_pula_ocr(tmp_path):
+    """extrair + Obsidian: wikilink puro e sem OCR, mesmo com alt próprio no docx."""
+    from unittest.mock import patch
+
+    path = tmp_path / "com_imagem.docx"
+    _criar_docx_com_imagem(path)
+
+    with patch("core.doc_converter.ocr_bytes") as ocr:
+        md = doc_to_md(
+            path, modo_imagem=ModoImagem.extrair, wikilinks=True,
+            assets_dir=tmp_path / "anexos", md_dir=tmp_path,
+        )
+
+    ocr.assert_not_called()
+    assert "![[img_0001.png]]" in md
+
+
 def test_docx_ignorar_descarta(tmp_path):
     """ignorar: imagem descartada sem escrever nada."""
     path = tmp_path / "com_imagem.docx"

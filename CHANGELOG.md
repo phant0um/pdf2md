@@ -24,6 +24,12 @@ Versioning follows [SemVer](https://semver.org/).
 
 ### Fixed
 
+- `--imagens ambos` com `--obsidian` agora faz OCR das imagens embutidas: o
+  texto vai como alias do embed (`![[img.png|texto]]`). Antes o wikilink saía
+  sem alt e o OCR era pulado.
+- `.docx` com `--imagens ambos` passa a exigir Tesseract, como PDF. Antes a
+  conversão rodava sem Tesseract e gravava "imagem" como alt-text em todas as
+  imagens, sem aviso.
 - `--workers 0` (ou negativo) derrubava o CLI com traceback do
   `ThreadPoolExecutor`; agora é erro de uso (`min=1`).
 - CSV com célula entre aspas contendo quebra de linha colava as palavras

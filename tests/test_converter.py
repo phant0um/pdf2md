@@ -135,12 +135,34 @@ def test_pdf_imagens_ambos_ocr_como_alt_text(tmp_path):
     assert "![TEXTO OCR DA IMAGEM](imagens_assets/img_p001_0.png)" in md
 
 
-def test_pdf_imagens_ambos_wikilinks_pula_ocr(tmp_path):
-    """Wikilink `![[nome]]` não carrega alt-text: OCR seria trabalho jogado fora."""
+def test_pdf_imagens_ambos_wikilinks_ocr_vira_alias(tmp_path):
+    """Modo ambos + Obsidian: o OCR da imagem vira alias do embed, uma vez só."""
+    pdf = _pdf_texto_com_imagens(tmp_path, qtd=1)
+
+    with patch("core.converter.ocr_bytes", return_value="Texto da figura\nlinha 2") as ocr:
+        md = pdf_to_md(pdf, modo_imagem=ModoImagem.ambos, wikilinks=True)
+
+    ocr.assert_called_once()
+    assert "![[img_p001_0.png|Texto da figura]]" in md
+
+
+def test_pdf_imagens_ambos_wikilinks_ocr_vazio_sem_alias(tmp_path):
+    """OCR sem texto: embed sai puro, sem alias vazio."""
+    pdf = _pdf_texto_com_imagens(tmp_path, qtd=1)
+
+    with patch("core.converter.ocr_bytes", return_value=""):
+        md = pdf_to_md(pdf, modo_imagem=ModoImagem.ambos, wikilinks=True)
+
+    assert "![[img_p001_0.png]]" in md
+    assert "|]]" not in md
+
+
+def test_pdf_imagens_extrair_wikilinks_pula_ocr(tmp_path):
+    """extrair + Obsidian: sem alias e sem OCR (alt só existe em ambos)."""
     pdf = _pdf_texto_com_imagens(tmp_path, qtd=1)
 
     with patch("core.converter.ocr_bytes") as ocr:
-        md = pdf_to_md(pdf, modo_imagem=ModoImagem.ambos, wikilinks=True)
+        md = pdf_to_md(pdf, modo_imagem=ModoImagem.extrair, wikilinks=True)
 
     ocr.assert_not_called()
     assert "![[img_p001_0.png]]" in md

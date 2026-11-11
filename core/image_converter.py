@@ -3,6 +3,7 @@ Converte arquivos de imagem em Markdown via OCR (Tesseract).
 Suporta: PNG, JPG, JPEG, TIFF, WEBP, BMP, HEIC.
 Pipeline: carrega imagem → pré-processa → OCR → retorna texto como MD.
 """
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -197,3 +198,23 @@ def alt_text_enxuto(ocr: str, max_chars: int = 120) -> str:
             limpa = linha.strip()
             return limpa[:max_chars] + ("…" if len(limpa) > max_chars else "")
     return "imagem"
+
+
+# Alias numérico em embed do Obsidian (`![[x|300]]`) é TAMANHO, não texto.
+_RE_ALIAS_TAMANHO = re.compile(r"^\d+(x\d+)?$")
+
+
+def wikilink_imagem(nome: str, alt: str | None = None) -> str:
+    """Wikilink de imagem Obsidian; o alt vira alias (`![[nome|texto]]`).
+
+    Sem alias quando alt é None, vazio, o default "imagem" ou número/tamanho
+    (`300`, `640x480`), que o Obsidian leria como largura. Caracteres que
+    quebrariam o wikilink (`|`, `[`, `]`) viram espaço.
+    """
+    if alt is None or alt == "imagem":
+        return f"![[{nome}]]"
+    limpo = re.sub(r"[|\[\]]", " ", alt)
+    limpo = re.sub(r"\s+", " ", limpo).strip()
+    if not limpo or _RE_ALIAS_TAMANHO.match(limpo):
+        return f"![[{nome}]]"
+    return f"![[{nome}|{limpo}]]"

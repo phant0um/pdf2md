@@ -18,6 +18,7 @@ from core.image_converter import (
     alt_text_enxuto,
     image_to_md,
     ocr_bytes,
+    wikilink_imagem,
 )
 from core.pdf_images import extrair_imagens
 from core.quality import reparar_ligaduras
@@ -342,17 +343,30 @@ def _anexar_imagens_embutidas(
     links: list[str] = []
     for asset in assets:
         alt = "imagem"
-        # Wikilink `![[nome]]` não carrega alt-text — OCR aqui seria descartado.
-        if contexto.modo == ModoImagem.ambos and not asset.duplicado and not contexto.wikilinks:
+        if contexto.modo == ModoImagem.ambos and not asset.duplicado:
             alt = alt_text_enxuto(ocr_bytes(asset.dados, asset.extensao))
-        links.append(_link_arquivo(asset.nome, asset.caminho_disco, contexto, alt))
+        links.append(_link_arquivo(
+            asset.nome, asset.caminho_disco, contexto, alt, alias_wikilink=True,
+        ))
 
     return texto.rstrip() + "\n\n" + "\n\n".join(links)
 
 
-def _link_arquivo(nome: str, caminho_disco: Path, contexto: ContextoAssets, alt: str) -> str:
-    """Monta o link do asset: wikilink Obsidian ou ![]() relativo ao MD (D1)."""
+def _link_arquivo(
+    nome: str,
+    caminho_disco: Path,
+    contexto: ContextoAssets,
+    alt: str,
+    alias_wikilink: bool = False,
+) -> str:
+    """Monta o link do asset: wikilink Obsidian ou ![]() relativo ao MD (D1).
+
+    `alias_wikilink` (só imagens embutidas): o alt vira alias do wikilink,
+    `![[nome|texto]]`. O link de render de página não usa alias.
+    """
     if contexto.wikilinks:
+        if alias_wikilink:
+            return wikilink_imagem(nome, alt)
         return f"![[{nome}]]"
     # md_dir precisa estar resolvido: no macOS /var é symlink de /private/var
     # e os caminhos dos assets já saem resolvidos — mistura viraria relpath gigante.
