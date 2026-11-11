@@ -40,7 +40,8 @@ DerivedData/
 .pytest_cache/
 .coverage
 htmlcov/
-*.xml
+coverage.xml
+junit*.xml
 
 # uv
 .python-version

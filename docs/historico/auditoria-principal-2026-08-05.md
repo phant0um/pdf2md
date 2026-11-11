@@ -1,6 +1,8 @@
 # Auditoria principal — pdf2md v0.6.0 (Grok 4.5 max)
 
-> Revisão da auditoria preliminar (`docs/auditoria-2026-08-05.md`) + auditoria independente.
+> Snapshot de agosto de 2026, arquivado em 2026-11-10 — não reflete o estado atual do código.
+
+> Revisão da auditoria preliminar (`docs/historico/auditoria-2026-08-05.md`) + auditoria independente.
 > Evidência obtida por leitura de código e execução local em 2026-08-05.
 
 ---
