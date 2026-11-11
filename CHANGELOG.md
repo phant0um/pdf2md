@@ -40,6 +40,9 @@ Versioning follows [SemVer](https://semver.org/).
   compila SwiftUI (plugin `SwiftUIMacros` ausente) e o build falhava no passo 2,
   depois do PyInstaller. Uma sonda escolhe o SDK (`PDF2MD_SDK`, padrão, versionados)
   e falha cedo.
+- PPTX com caixa de texto comum (Inserir > Caixa de Texto) falhava inteiro com
+  `ValueError: shape is not a placeholder`. Texto dentro de grupos e notas do
+  orador agora entram no Markdown.
 
 ## [0.6.1] — 2026-11-07
 
