@@ -12,11 +12,17 @@ Versioning follows [SemVer](https://semver.org/).
 
 ### Changed
 
+- GUI converte a lista inteira em um único processo (workers paralelos, dedup
+  de mesmo stem como `a.md` / `a-docx.md`), com progresso emitido por arquivo
+  durante a execução. Antes, um processo por arquivo, em sequência. CLI aceita
+  `-` como ORIGEM: lista NUL-separada no stdin (protocolo interno da GUI).
 - OCR por visão do LLM (fallback do Tesseract com menos de 10 caracteres) só roda
   com `--llm` ou `--llm-fallback` e usa o mesmo `--llm-url`/`--llm-modelo`. Antes
   rodava sempre que `PDF2MD_LLM_URL` estava definida, enviando imagens e páginas
   escaneadas para um provider remoto sem opt-in (privacidade e custo), e ignorava
   as flags. O alt-text de `--imagens ambos` nunca vai ao LLM.
+- `.gitignore` ignorava todo `*.xml` do repositório; agora só relatórios de teste (`coverage.xml`, `junit*.xml`).
+- `docs/progress.md` (parado no Ciclo 10) e os três relatórios de auditoria/revisão de agosto foram para `docs/historico/`, com nota de arquivamento; links do progress apontam para `phant0um/pdf2md`.
 
 ### Fixed
 
@@ -43,6 +49,13 @@ Versioning follows [SemVer](https://semver.org/).
   presa na estática.
 - `scripts/build_app.sh` abortava sem venv ativo (`VIRTUAL_ENV: unbound
   variable`); agora cai no `.venv/` do `uv sync`.
+- `scripts/build_app.sh`: só com Command Line Tools, o SDK padrão (MacOSX27.2) não
+  compila SwiftUI (plugin `SwiftUIMacros` ausente) e o build falhava no passo 2,
+  depois do PyInstaller. Uma sonda escolhe o SDK (`PDF2MD_SDK`, padrão, versionados)
+  e falha cedo.
+- PPTX com caixa de texto comum (Inserir > Caixa de Texto) falhava inteiro com
+  `ValueError: shape is not a placeholder`. Texto dentro de grupos e notas do
+  orador agora entram no Markdown.
 
 ## [0.6.1] — 2026-11-07
 
