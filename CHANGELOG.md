@@ -23,6 +23,10 @@ Versioning follows [SemVer](https://semver.org/).
   as flags. O alt-text de `--imagens ambos` nunca vai ao LLM.
 - `.gitignore` ignorava todo `*.xml` do repositório; agora só relatórios de teste (`coverage.xml`, `junit*.xml`).
 - `docs/progress.md` (parado no Ciclo 10) e os três relatórios de auditoria/revisão de agosto foram para `docs/historico/`, com nota de arquivamento; links do progress apontam para `phant0um/pdf2md`.
+- `--llm` melhorava só os primeiros 12 000 caracteres e colava o resto sem melhoria,
+  em silêncio. Agora o documento vai ao LLM em blocos cortados entre parágrafos (fora
+  de blocos de código), até 20 blocos (~240 mil caracteres), com aviso quando passa
+  disso ou quando um bloco falha; resposta vazia do LLM mantém o texto original.
 
 ### Fixed
 
