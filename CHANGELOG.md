@@ -5,6 +5,11 @@ Versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- Pillow 12.3.0 → 13.0.0: 39 advisories (PYSEC-2026-4326 e seguintes) apontadas
+  pelo `pip-audit` no CI.
+
 ### Changed
 
 - `docs/progress.md` (parado no Ciclo 10) e os três relatórios de auditoria/revisão de agosto foram para `docs/historico/`, com nota de arquivamento; links do progress apontam para `phant0um/pdf2md`.
