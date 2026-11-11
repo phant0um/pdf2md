@@ -5,6 +5,11 @@ Versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- Pillow 12.3.0 → 13.0.0: 39 advisories (PYSEC-2026-4326 e seguintes) apontadas
+  pelo `pip-audit` no CI.
+
 ### Changed
 
 - OCR por visão do LLM (fallback do Tesseract com menos de 10 caracteres) só roda
