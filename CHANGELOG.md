@@ -20,6 +20,9 @@ Versioning follows [SemVer](https://semver.org/).
 
 ### Fixed
 
+- Mensagens de erro com `/Users/<nome>` perdiam a palavra seguinte
+  (`"/Users/bob não encontrado"` virava `"[user] encontrado"`); agora só nomes
+  de contas locais com espaço são redigidos inteiros.
 - `--workers 0` (ou negativo) derrubava o CLI com traceback do
   `ThreadPoolExecutor`; agora é erro de uso (`min=1`).
 - CSV com célula entre aspas contendo quebra de linha colava as palavras

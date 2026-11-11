@@ -181,17 +181,62 @@ def test_sanitiza_path_outro_usuario_nao_vaza_username():
     assert resultado == "acesso negado: [user]"
 
 
-def test_sanitiza_path_outro_usuario_com_espaco_nao_vaza_username():
+def test_sanitiza_path_outro_usuario_com_espaco_nao_vaza_username(monkeypatch):
     """
     Finding #5 com username contendo espaço: "/Users/John Doe" → "[user]".
-    A regex casa só "/Users/John" (para no espaço), mas a segunda passada
-    consome " Doe" que sobraria.
+    Conta local com espaço é redigida inteira antes da regex de path.
     """
+    monkeypatch.setattr("core.utils._usuarios_com_espaco", lambda: ["John Doe"])
     msg = "erro: /Users/John Doe"
     resultado = sanitizar_mensagem_erro(msg)
     assert "John" not in resultado
     assert "Doe" not in resultado
     assert resultado == "erro: [user]"
+
+
+def test_sanitiza_usuario_sem_conta_local_preserva_palavra_seguinte(monkeypatch):
+    """
+    Regressão: a segunda passada antiga consumia a palavra após "[user]",
+    gerando "[user] encontrado" para "/Users/bob não encontrado".
+    """
+    monkeypatch.setattr("core.utils._usuarios_com_espaco", lambda: [])
+    assert sanitizar_mensagem_erro("/Users/bob não encontrado") == "[user] não encontrado"
+
+
+def test_sanitiza_conta_local_com_espaco_seguida_de_texto(monkeypatch):
+    """Conta local com espaço seguida de texto: só o username some."""
+    monkeypatch.setattr("core.utils._usuarios_com_espaco", lambda: ["John Doe"])
+    assert sanitizar_mensagem_erro("/Users/John Doe não existe") == "[user] não existe"
+
+
+def test_sanitiza_conta_local_com_espaco_em_path_profundo(monkeypatch):
+    """Conta local com espaço em path profundo: reduz ao basename."""
+    monkeypatch.setattr("core.utils._usuarios_com_espaco", lambda: ["John Doe"])
+    assert sanitizar_mensagem_erro("/Users/John Doe/Desktop/x.pdf") == "x.pdf"
+
+
+def test_sanitiza_prefixo_de_conta_local_nao_casa_no_meio_de_palavra(monkeypatch):
+    """Limite: "John Doe" não casa dentro de "John Doery" (pré-passe não dispara)."""
+    monkeypatch.setattr("core.utils._usuarios_com_espaco", lambda: ["John Doe"])
+    assert sanitizar_mensagem_erro("/Users/John Doery") == "[user] Doery"
+
+
+def test_usuarios_com_espaco_lista_do_maior_para_o_menor(tmp_path, monkeypatch):
+    """Lista só diretórios com espaço, do nome mais longo para o mais curto."""
+    from core import utils
+
+    for nome in ("Ana Lima", "bob", "Ana Lima Souza"):
+        (tmp_path / nome).mkdir()
+    monkeypatch.setattr(utils, "_DIR_USUARIOS", tmp_path)
+    assert utils._usuarios_com_espaco() == ["Ana Lima Souza", "Ana Lima"]
+
+
+def test_usuarios_com_espaco_diretorio_ausente_devolve_vazio(tmp_path, monkeypatch):
+    """Diretório inexistente não levanta: devolve lista vazia."""
+    from core import utils
+
+    monkeypatch.setattr(utils, "_DIR_USUARIOS", tmp_path / "nao-existe")
+    assert utils._usuarios_com_espaco() == []
 
 
 def test_sanitizar_celula_md_quebras_cr_e_crlf_viram_espaco():
