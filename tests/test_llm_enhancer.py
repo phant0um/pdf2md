@@ -821,3 +821,111 @@ def test_melhorar_markdown_resposta_truncada_preserva_original(tmp_path):
 
     assert resultado == "texto original completo"
     assert any("RespostaTruncadaError" in aviso for aviso in avisos)
+
+
+def test_bloco_so_quebras_nao_duplica(tmp_path, monkeypatch):
+    """Bloco só de "\\n" não vai ao LLM e não é duplicado na junção (LLM identidade)."""
+    import core.llm_enhancer as le
+
+    monkeypatch.setattr(le, "_MAX_CHARS_LLM", 50)
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    md = "aaa " * 8 + "\n" * 100 + "bbb " * 8
+    # Garante que o corte cai numa corrida de quebras e gera bloco só de "\n".
+    assert any(b.strip() == "" for b in le._dividir_blocos(md, 50))
+
+    enviados: list[str] = []
+
+    def identidade(msgs, cfg=None):
+        corpo = _bloco_do_prompt(msgs)
+        enviados.append(corpo)
+        return corpo
+
+    with patch("core.llm_enhancer._completar", side_effect=identidade):
+        resultado, avisos = melhorar_markdown(md, f)
+
+    assert resultado == md
+    assert avisos == []
+    assert all(corpo.strip() for corpo in enviados)
+
+
+def test_resposta_vazia_mantem_bloco(tmp_path, monkeypatch):
+    """Resposta vazia do LLM num bloco mantém o original e registra RespostaVazia."""
+    import core.llm_enhancer as le
+
+    monkeypatch.setattr(le, "_MAX_CHARS_LLM", 50)
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    md = "\n\n".join(["aaa " * 8, "bbb " * 8, "ccc " * 8])
+
+    chamada = {"n": 0}
+
+    def fake_completar(msgs, cfg=None):
+        chamada["n"] += 1
+        if chamada["n"] == 1:
+            return ""
+        return _bloco_do_prompt(msgs)
+
+    with patch("core.llm_enhancer._completar", side_effect=fake_completar):
+        resultado, avisos = melhorar_markdown(md, f)
+
+    assert resultado == md
+    assert len(avisos) == 1
+    assert "RespostaVazia" in avisos[0]
+    assert "1 de 3" in avisos[0]
+
+
+def test_resposta_vazia_um_bloco_devolve_original(tmp_path):
+    """Doc de um bloco com resposta vazia (ou só espaços) devolve o md + aviso."""
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    md = "texto curto\n\nsegundo parágrafo"
+
+    for resposta in ("", "   \n"):
+        with patch("core.llm_enhancer._completar", return_value=resposta):
+            resultado, avisos = melhorar_markdown(md, f)
+
+        assert resultado == md
+        assert avisos == ["LLM enhancement falhou (RespostaVazia)"]
+
+
+def test_propriedade_identidade_preserva_markdown(tmp_path, monkeypatch):
+    """Com LLM identidade, a saída é igual à entrada para md aleatórios (seed fixa)."""
+    import random
+
+    import core.llm_enhancer as le
+
+    monkeypatch.setattr(le, "_MAX_CHARS_LLM", 60)
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    rng = random.Random(20261111)
+
+    def md_aleatorio() -> str:
+        pecas: list[str] = []
+        for _ in range(rng.randint(3, 12)):
+            sorteio = rng.random()
+            if sorteio < 0.3:
+                pecas.append(" ".join(rng.choice(["palavra", "texto", "x"]) for _ in range(rng.randint(1, 6))))
+            elif sorteio < 0.45:
+                pecas.append("\n" * rng.randint(2, 40))  # corrida longa de quebras
+            elif sorteio < 0.6:
+                pecas.append("\n")  # quebra isolada
+            elif sorteio < 0.75:
+                linhas = "".join(f"| {i} | x |\n" for i in range(rng.randint(1, 8)))
+                pecas.append("| a | b |\n|---|---|\n" + linhas)
+            else:
+                pecas.append("## Título\n\n")
+            pecas.append(rng.choice(["", "\n", "\n\n"]))
+        return "".join(pecas)
+
+    def identidade(msgs, cfg=None):
+        corpo = _bloco_do_prompt(msgs)
+        assert corpo.strip()  # nunca envia bloco vazio
+        return corpo
+
+    with patch("core.llm_enhancer._completar", side_effect=identidade):
+        for _ in range(200):
+            md = md_aleatorio()
+            resultado, avisos = melhorar_markdown(md, f)
+            assert resultado == md
+            assert all("falhou" not in aviso for aviso in avisos)

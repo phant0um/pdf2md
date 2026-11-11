@@ -20,7 +20,7 @@ Versioning follows [SemVer](https://semver.org/).
 - `--llm` melhorava só os primeiros 12 000 caracteres e colava o resto sem melhoria,
   em silêncio. Agora o documento vai ao LLM em blocos cortados entre parágrafos (fora
   de blocos de código), até 20 blocos (~240 mil caracteres), com aviso quando passa
-  disso ou quando um bloco falha.
+  disso ou quando um bloco falha; resposta vazia do LLM mantém o texto original.
 
 ### Fixed
 

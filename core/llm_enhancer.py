@@ -393,6 +393,8 @@ def melhorar_markdown(
     original e os demais continuam melhorados. Se todos os blocos enviados
     falham, devolve o `md` original. As quebras de linha originais nas bordas de
     cada bloco são preservadas (não se insere linha em branco num corte simples).
+    Bloco só de quebras/espaços não vai ao LLM e volta como está. Resposta vazia
+    do LLM conta como falha: o bloco original é mantido com aviso.
 
     Falha graciosamente: se o LLM não estiver disponível ou retornar erro,
     retorna o markdown original com um aviso — nunca bloqueia a conversão.
@@ -411,16 +413,25 @@ def melhorar_markdown(
         prompt = _PROMPT_MELHORIA.format(nome=origem.name, md=md)
         try:
             resultado = _completar([{"role": "user", "content": prompt}], config)
-            return resultado, []
         except Exception as exc:
             # Não inclui str(exc) no aviso — pode conter URL, credencial ou path
             # do ambiente (CWE-209/532). Só o nome do tipo é exposto.
             return md, [f"LLM enhancement falhou ({type(exc).__name__})"]
+        if not resultado.strip():
+            # Resposta vazia apagaria o documento; mantém o original.
+            return md, ["LLM enhancement falhou (RespostaVazia)"]
+        return resultado, []
 
     enviados = blocos[:_MAX_BLOCOS_LLM]
     partes: list[str] = []
     tipos_falha: list[str] = []
     for bloco in enviados:
+        # Bloco só de quebras não tem texto a melhorar: sem chamada ao LLM e
+        # sem contar como falha. Sem este atalho, lstrip/rstrip devolvem "" e
+        # a borda inicial/final copia o bloco inteiro (quebras duplicadas).
+        if not bloco.strip():
+            partes.append(bloco)
+            continue
         prompt = _PROMPT_MELHORIA.format(nome=origem.name, md=bloco)
         try:
             melhorado = _completar([{"role": "user", "content": prompt}], config)
@@ -428,6 +439,11 @@ def melhorar_markdown(
             # Bloco que falha mantém o texto original; os demais seguem.
             partes.append(bloco)
             tipos_falha.append(type(exc).__name__)
+            continue
+        if not melhorado.strip():
+            # Resposta vazia conta como falha: mantém o bloco original.
+            partes.append(bloco)
+            tipos_falha.append("RespostaVazia")
             continue
         # Preserva as quebras de borda ORIGINAIS do bloco: um corte após um único
         # "\n" (dentro de uma tabela, por exemplo) não pode virar linha em branco.
