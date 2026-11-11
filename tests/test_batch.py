@@ -6,7 +6,8 @@ import fitz
 import pytest
 from PIL import Image, ImageDraw
 
-from core.batch import StatusArquivo, batch_convert
+from core.batch import ResultadoArquivo, StatusArquivo, _processar_arquivo, batch_convert
+from core.llm_enhancer import ConfigLLM
 from core.utils import ModoImagem
 
 
@@ -590,3 +591,213 @@ def test_batch_diretorio_apenas_subpasta_sem_resultados(tmp_path):
     resultados = batch_convert(origem=entrada, destino=tmp_path / "saida", workers=1)
 
     assert resultados == []
+
+
+# ── Origem como lista (protocolo da GUI: 1 chamada para o lote inteiro) ─────
+
+def _csv(path: Path, texto: str = "a,b\n1,2\n") -> Path:
+    """CSV não exige OCR: fixture barata para o caminho de lista."""
+    path.write_text(texto, encoding="utf-8")
+    return path
+
+
+def test_batch_lista_mesmo_stem_dedup(tmp_path):
+    """Lista com a.pdf + a.docx → a.md e a-docx.md (dedup mesmo na lista)."""
+    from docx import Document
+
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+    doc = fitz.open()
+    p = doc.new_page(width=595, height=842)
+    p.insert_text((50, 50), "Conteudo do PDF da lista para validacao do batch converter.")
+    doc.save(str(entrada / "a.pdf"))
+    doc.close()
+    docx = Document()
+    docx.add_paragraph("Conteudo do DOCX da lista para validacao.")
+    docx.save(str(entrada / "a.docx"))
+
+    resultados = batch_convert(
+        origem=[entrada / "a.pdf", entrada / "a.docx"],
+        destino=tmp_path / "saida",
+        workers=2,
+    )
+
+    assert all(r.status == StatusArquivo.CONCLUIDO for r in resultados)
+    nomes = {r.origem.name: r.destino.name for r in resultados}
+    assert nomes == {"a.pdf": "a.md", "a.docx": "a-docx.md"}
+
+
+def test_batch_lista_ausente_e_diretorio_viram_erro_sem_abortar(tmp_path):
+    """Ausente ou diretório na lista → ERRO naquele item; o restante converte."""
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+    ok = _csv(entrada / "ok.csv")
+    ausente = entrada / "fantasma.pdf"
+    pasta = entrada / "pasta"
+    pasta.mkdir()
+
+    resultados = batch_convert(
+        origem=[ausente, ok, pasta], destino=tmp_path / "saida", workers=2,
+    )
+
+    por_origem = {r.origem: r for r in resultados}
+    assert por_origem[ok].status == StatusArquivo.CONCLUIDO
+    assert por_origem[ausente].status == StatusArquivo.ERRO
+    assert por_origem[ausente].erro == "Arquivo não encontrado: fantasma.pdf"
+    assert por_origem[pasta].status == StatusArquivo.ERRO
+    assert por_origem[pasta].erro == "Arquivo não encontrado: pasta"
+
+
+def test_batch_lista_traversal_rejeitado(tmp_path):
+    """Caminho com traversal dentro da lista → ValueError, como na origem Path."""
+    with pytest.raises(ValueError, match="traversal"):
+        batch_convert(
+            origem=[tmp_path / ".." / ".." / "etc" / "passwd.pdf"],
+            destino=tmp_path / "saida",
+            workers=1,
+        )
+
+
+def test_batch_callbacks_uma_vez_por_arquivo_e_ordem(tmp_path):
+    """ao_concluir: 1x por arquivo (inclusive ignorado e ausente).
+    ao_iniciar: 1x por arquivo convertido, sempre antes do ao_concluir dele."""
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+    ok = _csv(entrada / "ok.csv")
+    txt = entrada / "nota.txt"
+    txt.write_text("não suportado", encoding="utf-8")
+    ausente = entrada / "fantasma.pdf"
+
+    eventos: list[tuple[str, str]] = []
+    concluidos: list[ResultadoArquivo] = []
+
+    def _iniciar(p: Path) -> None:
+        eventos.append(("iniciar", p.name))
+
+    def _concluir(r: ResultadoArquivo) -> None:
+        eventos.append(("concluir", r.origem.name))
+        concluidos.append(r)
+
+    resultados = batch_convert(
+        origem=[ok, txt, ausente],
+        destino=tmp_path / "saida",
+        workers=2,
+        ao_iniciar=_iniciar,
+        ao_concluir=_concluir,
+    )
+
+    assert len(concluidos) == len(resultados) == 3
+    assert sorted(r.origem.name for r in concluidos) == ["fantasma.pdf", "nota.txt", "ok.csv"]
+    assert [e for e in eventos if e[0] == "iniciar"] == [("iniciar", "ok.csv")]
+    assert eventos.index(("iniciar", "ok.csv")) < eventos.index(("concluir", "ok.csv"))
+
+
+def test_batch_origem_path_aceita_callbacks(tmp_path):
+    """Origem Path + callbacks: mesmos resultados, ao_concluir 1x por arquivo."""
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+    ok = _csv(entrada / "ok.csv")
+    concluidos: list[ResultadoArquivo] = []
+    iniciados: list[Path] = []
+
+    resultados = batch_convert(
+        origem=ok,
+        destino=tmp_path / "saida",
+        workers=1,
+        ao_iniciar=iniciados.append,
+        ao_concluir=concluidos.append,
+    )
+
+    assert concluidos == resultados
+    assert iniciados == [ok]
+
+
+# ── LLM com visão: opt-in propagado até image_to_md ──────────────────────────
+
+def _espiar_image_to_md(monkeypatch) -> list[object]:
+    """Troca image_to_md (módulo e registry) por espião que guarda o `visao` recebido.
+
+    O registry guarda a referência original: sem trocar a entrada dele, o
+    despacho chamaria o conversor real e o espião nunca seria visto.
+    O pipeline de qualidade é isolado para não consultar LLM de verdade.
+    """
+    import core.batch as batch
+
+    original = batch.image_to_md
+    visoes: list[object] = []
+
+    def espiao(path, visao=None):
+        visoes.append(visao)
+        return "# OCR"
+
+    registry = [
+        (exts, espiao if fn is original else fn) for exts, fn in batch._CONVERSORES
+    ]
+    monkeypatch.setattr(batch, "image_to_md", espiao)
+    monkeypatch.setattr(batch, "_CONVERSORES", registry)
+    monkeypatch.setattr(batch, "aplicar_pipeline_qualidade", lambda md, *a, **k: (md, []))
+    return visoes
+
+
+def _png_branco(tmp_path: Path) -> Path:
+    path = tmp_path / "scan.png"
+    Image.new("RGB", (50, 50), color="white").save(path)
+    return path
+
+
+def test_processar_imagem_llm_fallback_passa_config(tmp_path, monkeypatch):
+    """llm_fallback=True sem llm_config → image_to_md recebe ConfigLLM padrão."""
+    visoes = _espiar_image_to_md(monkeypatch)
+
+    res = _processar_arquivo(
+        str(_png_branco(tmp_path)), str(tmp_path / "saida.md"), False, True,
+        llm_fallback=True,
+    )
+
+    assert res["status"] == StatusArquivo.CONCLUIDO.value
+    assert len(visoes) == 1
+    assert isinstance(visoes[0], ConfigLLM)
+
+
+def test_processar_imagem_sem_flags_visao_none(tmp_path, monkeypatch):
+    """Sem --llm/--llm-fallback → image_to_md recebe visao=None (LLM nunca chamado)."""
+    visoes = _espiar_image_to_md(monkeypatch)
+
+    res = _processar_arquivo(
+        str(_png_branco(tmp_path)), str(tmp_path / "saida.md"), False, True,
+    )
+
+    assert res["status"] == StatusArquivo.CONCLUIDO.value
+    assert visoes == [None]
+
+
+def test_processar_imagem_config_sem_flags_visao_none(tmp_path, monkeypatch):
+    """llm_config presente mas sem --llm/--llm-fallback → visao=None.
+
+    Vazamento corrigido: antes, a config chegava ao conversor só por existir,
+    e o LLM com visão era chamado sem opt-in explícito.
+    """
+    visoes = _espiar_image_to_md(monkeypatch)
+
+    res = _processar_arquivo(
+        str(_png_branco(tmp_path)), str(tmp_path / "saida.md"), False, True,
+        usar_llm=False, llm_fallback=False,
+        llm_config=ConfigLLM(url="http://x/v1", modelo="m"),
+    )
+
+    assert res["status"] == StatusArquivo.CONCLUIDO.value
+    assert visoes == [None]
+
+
+def test_processar_imagem_llm_config_mesmo_objeto(tmp_path, monkeypatch):
+    """usar_llm=True + llm_config → o mesmo objeto de config chega a image_to_md."""
+    visoes = _espiar_image_to_md(monkeypatch)
+    cfg = ConfigLLM(url="http://x:1/v1", modelo="m")
+
+    res = _processar_arquivo(
+        str(_png_branco(tmp_path)), str(tmp_path / "saida.md"), False, True,
+        usar_llm=True, llm_config=cfg,
+    )
+
+    assert res["status"] == StatusArquivo.CONCLUIDO.value
+    assert visoes[0] is cfg

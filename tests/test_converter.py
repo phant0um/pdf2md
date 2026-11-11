@@ -8,6 +8,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from core.converter import pdf_to_md
+from core.llm_enhancer import ConfigLLM
 from core.utils import ModoImagem
 
 
@@ -132,6 +133,35 @@ def test_pdf_imagens_ambos_ocr_como_alt_text(tmp_path):
         md = pdf_to_md(pdf, modo_imagem=ModoImagem.ambos)
 
     assert "![TEXTO OCR DA IMAGEM](imagens_assets/img_p001_0.png)" in md
+
+
+def test_pdf_imagens_ambos_wikilinks_pula_ocr(tmp_path):
+    """Wikilink `![[nome]]` não carrega alt-text: OCR seria trabalho jogado fora."""
+    pdf = _pdf_texto_com_imagens(tmp_path, qtd=1)
+
+    with patch("core.converter.ocr_bytes") as ocr:
+        md = pdf_to_md(pdf, modo_imagem=ModoImagem.ambos, wikilinks=True)
+
+    ocr.assert_not_called()
+    assert "![[img_p001_0.png]]" in md
+
+
+def test_pdf_scan_passa_visao_para_image_to_md(tmp_path):
+    """Página-scan + pdf_to_md(visao=cfg): image_to_md recebe o mesmo cfg (opt-in)."""
+    img_path = tmp_path / "scan.png"
+    Image.new("RGB", (400, 200), color="white").save(img_path)
+    path = tmp_path / "scan.pdf"
+    doc = fitz.open()
+    pagina = doc.new_page(width=400, height=200)
+    pagina.insert_image(fitz.Rect(0, 0, 400, 200), filename=str(img_path))
+    doc.save(str(path))
+    doc.close()
+
+    cfg = ConfigLLM(url="http://x:1/v1", modelo="m")
+    with patch("core.converter.image_to_md", return_value="OCR") as ocr:
+        pdf_to_md(path, visao=cfg)
+
+    assert ocr.call_args.kwargs["visao"] is cfg
 
 
 def test_pdf_scan_extrair_persiste_render(tmp_path, mock_tesseract):

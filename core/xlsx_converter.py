@@ -9,13 +9,16 @@ Nota: .xls (formato legado) não suportado — requer xlrd e o formato está
 obsoleto desde Excel 2007. Usuários devem converter para .xlsx primeiro.
 """
 import csv
+import io
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 from core.utils import _linha_tabela_md, _sanitizar_celula_md, _validar_existencia
 
 # Encodings tentados em cascade para CSV — latin-1 nunca falha (mapeia 256 bytes).
-_CSV_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")
+# utf-8-sig cobre UTF-8 com e sem BOM.
+_CSV_ENCODINGS = ("utf-8-sig", "cp1252", "latin-1")
 
 
 def planilha_to_md(path: Path) -> str:
@@ -65,51 +68,52 @@ def _xlsx_para_md(path: Path) -> str:
         for sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
 
-            # FIX 6: duas passadas em vez de list(iter_rows(values_only=True))
-            # — read_only=True é streaming; materializar 1M linhas em memória
-            # derrotava o propósito. A 1ª passada acha a primeira linha
-            # NÃO-VAZIA como header — antes, sheet com linhas vazias no topo
-            # tinha "headers" todos vazios e o conteúdo era descartado
-            # silenciosamente (só o heading `## nome` era emitido).
-            header = _primeira_linha_nao_vazia(ws)
-            if header is None:
+            # FIX 6: uma passada em streaming (read_only=True) — sem
+            # list(iter_rows(values_only=True)), que materializaria 1M linhas.
+            # _tabela_md pula linhas vazias no topo, então a primeira linha
+            # com conteúdo vira o header; sheet sem conteúdo devolve "".
+            tabela = _tabela_md(
+                [_celula_str(c) for c in row] for row in ws.iter_rows(values_only=True)
+            )
+            if not tabela:
                 continue  # sheet sem nenhuma célula com conteúdo
-            headers = [_celula_str(c) for c in header]
-
-            linhas: list[str] = []
-            linhas.append(_linha_tabela_md(headers))
-            linhas.append(_linha_tabela_md(["---"] * len(headers)))
-
-            # 2ª passada: corpo — pula a primeira linha não-vazia (o header
-            # já usado acima) e linhas totalmente vazias.
-            header_visto = False
-            for row in ws.iter_rows(values_only=True):
-                celulas = [_celula_str(c) for c in row]
-                if not any(celulas):
-                    continue
-                if not header_visto:
-                    header_visto = True
-                    continue
-                linhas.append(_linha_tabela_md(celulas))
-
-            partes.append(f"## {sheet_name}\n\n" + "\n".join(linhas))
+            partes.append(f"## {sheet_name}\n\n" + tabela)
     finally:
         wb.close()
 
     return "\n\n".join(partes)
 
 
-def _primeira_linha_nao_vazia(ws: Any) -> tuple[Any, ...] | None:
-    """Primeira linha com ao menos uma célula com conteúdo (header real).
+def _tabela_md(linhas: Iterable[list[str]]) -> str:
+    """Monta tabela Markdown GFM com largura uniforme a partir de células sanitizadas.
 
-    FIX 6: em vez de assumir que a linha 0 é o header, varre até achar a
-    primeira linha utilizável — planilhas com linhas em branco no topo
-    (comuns em exportações) não perdem mais o cabeçalho nem o corpo.
+    Regras:
+    - Linhas totalmente vazias são descartadas; a 1ª restante é o cabeçalho.
+    - Colunas vazias à direita de cada linha saem (openpyxl costuma padear a
+      planilha com colunas vazias em todas as linhas).
+    - Largura = maior número de células entre cabeçalho e corpo. Linhas mais
+      curtas recebem células vazias à direita; a tabela fica válida.
+
+    Retorna "" se não houver nenhuma célula com conteúdo.
     """
-    for row in ws.iter_rows(values_only=True):
-        if any(_celula_str(c) for c in row):
-            return tuple(row)  # tuple(Any) → tuple[Any, ...] (mypy no-any-return)
-    return None
+    validas: list[list[str]] = []
+    for celulas in linhas:
+        aparadas = list(celulas)
+        while aparadas and not aparadas[-1]:
+            aparadas.pop()
+        if aparadas:
+            validas.append(aparadas)
+
+    if not validas:
+        return ""
+
+    largura = max(len(linha) for linha in validas)
+    tabela = [
+        _linha_tabela_md(linha + [""] * (largura - len(linha))) for linha in validas
+    ]
+    # Separador entre cabeçalho e corpo, com a mesma largura.
+    tabela.insert(1, _linha_tabela_md(["---"] * largura))
+    return "\n".join(tabela)
 
 
 def _csv_para_md(path: Path) -> str:
@@ -120,24 +124,18 @@ def _csv_para_md(path: Path) -> str:
     for enc in _CSV_ENCODINGS:
         try:
             texto = dados.decode(enc)
-            rows = list(csv.reader(texto.splitlines()))
-            break
         except UnicodeDecodeError:
             continue
+        # StringIO com newline="" (não splitlines): célula entre aspas com
+        # quebra de linha chega inteira ao csv.reader — splitlines colava
+        # as palavras ("linha1\nlinha2" virava "linha1linha2").
+        rows = list(csv.reader(io.StringIO(texto, newline="")))
+        break
 
     if not rows:
         return ""
 
-    headers = [_celula_str(c) for c in rows[0]]
-    linhas: list[str] = []
-    linhas.append("| " + " | ".join(headers) + " |")
-    linhas.append("| " + " | ".join(["---"] * len(headers)) + " |")
-
-    for row in rows[1:]:
-        celulas = [_celula_str(c) for c in row]
-        linhas.append("| " + " | ".join(celulas) + " |")
-
-    return "\n".join(linhas)
+    return _tabela_md([_celula_str(c) for c in row] for row in rows)
 
 
 def _celula_str(valor: Any) -> str:

@@ -3,6 +3,7 @@ Testes para core/xlsx_converter.py.
 Fixtures criadas programaticamente via openpyxl e csv stdlib.
 """
 import csv
+import re
 from pathlib import Path
 
 import openpyxl
@@ -221,3 +222,110 @@ def test_celula_str_quebra_linha():
 
 def test_celula_str_numero():
     assert _celula_str(42) == "42"
+
+
+def test_csv_celula_multilinha_entre_aspas(tmp_path):
+    """Célula entre aspas com quebra de linha: palavras separadas por espaço.
+
+    Antes, `splitlines()` antes do csv.reader colava "linha1" e "linha2".
+    """
+    f = tmp_path / "multi.csv"
+    f.write_text('h1,h2\n"linha1\nlinha2",x\n', encoding="utf-8")
+    md = planilha_to_md(f)
+    assert "| linha1 linha2 | x |" in md
+
+
+# ── Largura uniforme da tabela (item 9) ─────────────────────────────────────
+
+def _pipes_nao_escapados(linha: str) -> int:
+    return len(re.findall(r"(?<!\\)\|", linha))
+
+
+def _linhas_de_tabela(md: str) -> list[str]:
+    return [linha for linha in md.split("\n") if linha.startswith("|")]
+
+
+def test_csv_linha_curta_e_longa_ganham_mesma_largura(tmp_path):
+    """Linha curta é preenchida; linha longa estende o cabeçalho; "6" não some."""
+    f = tmp_path / "irregular.csv"
+    f.write_text("a,b,c\n1,2\n3,4,5,6\n", encoding="utf-8")
+    md = planilha_to_md(f)
+    assert "6" in md
+    linhas = _linhas_de_tabela(md)
+    assert len(linhas) == 4
+    assert {_pipes_nao_escapados(linha) for linha in linhas} == {5}
+    assert "| 1 | 2 |  |" in md
+    assert "| a | b | c |  |" in md
+
+
+def test_csv_linhas_em_branco_sao_ignoradas(tmp_path):
+    """Linhas em branco no topo, no meio e no fim não viram |  | nem header."""
+    f = tmp_path / "brancos.csv"
+    f.write_text("\na,b\n\n1,2\n\n", encoding="utf-8")
+    md = planilha_to_md(f)
+    assert "|  |" not in md
+    assert md.split("\n")[0] == "| a | b |"
+    assert "| 1 | 2 |" in md
+    assert _sem_linha_vazia_em_tabela(md), md
+
+
+def test_csv_colunas_vazias_a_direita_saem(tmp_path):
+    """Colunas vazias à direita em todas as linhas não geram colunas extras."""
+    f = tmp_path / "vazias.csv"
+    f.write_text("a,b,,\n1,2,,\n", encoding="utf-8")
+    md = planilha_to_md(f)
+    assert md == "| a | b |\n| --- | --- |\n| 1 | 2 |"
+
+
+def test_csv_so_linhas_em_branco_retorna_vazio(tmp_path):
+    """CSV sem nenhuma célula com conteúdo produz string vazia."""
+    f = tmp_path / "so_brancos.csv"
+    f.write_text("\n,\n\n", encoding="utf-8")
+    assert planilha_to_md(f) == ""
+
+
+def test_xlsx_linhas_irregulares_mesma_largura(tmp_path):
+    """XLSX com linhas de larguras diferentes: mesmo número de pipes em toda linha."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Irregular"
+    ws.append(["a", "b", "c"])
+    ws.append([1, 2])
+    ws.append([3, 4, 5, 6])
+    path = tmp_path / "irregular.xlsx"
+    wb.save(str(path))
+    md = planilha_to_md(path)
+    assert "6" in md
+    linhas = _linhas_de_tabela(md)
+    assert len(linhas) == 4
+    assert {_pipes_nao_escapados(linha) for linha in linhas} == {5}
+
+
+def test_xlsx_sheet_so_com_celulas_vazias_e_pulada(tmp_path):
+    """Sheet sem nenhum conteúdo não gera heading nem tabela."""
+    wb = openpyxl.Workbook()
+    ws1 = wb.active
+    ws1.title = "Vazia"
+    ws1.append([None, None])
+    ws2 = wb.create_sheet("Cheia")
+    ws2.append(["x", "y"])
+    path = tmp_path / "vazia_cheia.xlsx"
+    wb.save(str(path))
+    md = planilha_to_md(path)
+    assert "## Vazia" not in md
+    assert "## Cheia\n\n| x | y |" in md
+
+
+def test_xlsx_linhas_vazias_no_topo_mantem_header(tmp_path):
+    """FIX 6: linhas vazias antes do header não fazem o cabeçalho sumir."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Topo"
+    ws.append([None, None])
+    ws.append([None, None])
+    ws.append(["Nome", "Valor"])
+    ws.append(["Alpha", 1])
+    path = tmp_path / "topo.xlsx"
+    wb.save(str(path))
+    md = planilha_to_md(path)
+    assert "## Topo\n\n| Nome | Valor |\n| --- | --- |\n| Alpha | 1 |" in md

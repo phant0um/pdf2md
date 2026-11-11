@@ -1,5 +1,6 @@
 // ContentView.swift
 // Interface principal: drag-drop + configurações + progresso
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -12,6 +13,9 @@ struct ContentView: View {
     @State private var isDragOver: Bool = false
     @State private var tarefaConversao: Task<Void, Never>?
     @State private var erroColagem: String? = nil  // nil = sem alert; non-nil = mensagem exibida
+    // Espelho observável da key do Keychain: troca só da chave nas Preferências
+    // reavalia `llmConfigurado` (o cache do KeychainHelper não é observável).
+    @State private var chaveLLM: String? = KeychainHelper.ler()
 
     // Config do LLM (Preferências) — @AppStorage espelha SettingsView
     @AppStorage(LLMDefaultsKeys.provider) private var llmProviderRaw = LLMProvider.ollama.rawValue
@@ -23,10 +27,13 @@ struct ContentView: View {
         LLMProvider.configurado(
             providerRaw: llmProviderRaw,
             urlPersonalizada: llmUrlPersonalizada,
-            chave: KeychainHelper.ler(),
+            chave: chaveLLM,
             modelo: llmModelo
         )
     }
+
+    /// Toggle efetivamente ativo: ligado e com config válida.
+    private var llmAtivo: Bool { modoLLM && llmConfigurado }
 
     // Piso da lista de arquivos (~5 linhas). Sem teto: a lista é elástica e
     // absorve todo o espaço livre da janela.
@@ -126,6 +133,10 @@ struct ContentView: View {
                             }
                         }
                         .disabled(processador.estaProcessando || !llmConfigurado)
+                        .onChange(of: llmConfigurado) { configurado in
+                            // Config ficou incompleta: desliga o toggle em vez de deixá-lo ligado e desabilitado
+                            if !configurado { modoLLM = false }
+                        }
 
                         if !llmConfigurado {
                             Button("Abrir Preferências…") {
@@ -169,6 +180,10 @@ struct ContentView: View {
         }
         // Altura mínima cobre topo + rodapé fixos + uma lista utilizável.
         .frame(minWidth: 480, minHeight: 640)
+        // Key salva/apagada nas Preferências: atualiza o espelho e reavalia llmConfigurado
+        .onReceive(NotificationCenter.default.publisher(for: KeychainHelper.mudou).receive(on: RunLoop.main)) { _ in
+            chaveLLM = KeychainHelper.ler()
+        }
         // Alert com mensagem dinâmica — distingue clipboard vazio de erro de I/O
         .alert(
             "Erro ao colar imagem",
@@ -419,11 +434,8 @@ struct ContentView: View {
             erroColagem = "Nenhuma imagem no clipboard."
             return
         }
-        guard let cachesBase = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
-            erroColagem = "Diretório de cache não encontrado."
-            return
-        }
-        let dir = cachesBase.appendingPathComponent("pdf2md/pastes")
+        // Mesmo diretório que limpar() varre — fonte única em `pasteDir`.
+        let dir = pasteDir
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             // UUID garante unicidade — sem colisão por segundo-granularity
@@ -494,7 +506,8 @@ struct ContentView: View {
                 destino: modoObsidian ? nil : destino,
                 vault: modoObsidian ? destino : nil,
                 obsidian: modoObsidian,
-                llmFallback: modoLLM,
+                // defesa: nunca manda --llm-fallback com config incompleta
+                llmFallback: llmAtivo,
                 llmURL: LLMProvider.urlResolvida(
                     providerRaw: llmProviderRaw,
                     urlPersonalizada: llmUrlPersonalizada

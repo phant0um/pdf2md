@@ -103,11 +103,14 @@ def _processar_arquivo(
     if not sobrescrever and destino.exists():
         return _resultado_ignorado(origem_str, destino_str)
 
+    # LLM com visão só com opt-in explícito (--llm / --llm-fallback); sem ele, None.
+    visao = (llm_config or ConfigLLM()) if (usar_llm or llm_fallback) else None
+
     try:
         avisos_imagens: list[str] = []
         md = _converter_arquivo(
             origem, ignorar_margens, modo_imagem, destino,
-            obsidian, assets_dir_str, avisos_imagens,
+            obsidian, assets_dir_str, avisos_imagens, visao,
         )
         if md is None:
             return _resultado_ignorado(origem_str, None)
@@ -141,12 +144,15 @@ def _converter_arquivo(
     obsidian: bool = False,
     assets_dir_str: str | None = None,
     avisos: list[str] | None = None,
+    visao: ConfigLLM | None = None,
 ) -> str | None:
     """
     Despacha para o conversor correto baseado na extensão. None = não suportado.
 
-    `--imagens` é PDF-only: só pdf_to_md recebe o modo (padrão de
-    `ignorar_margens`); outros formatos ganham um aviso, não erro.
+    `--imagens` vale para PDF e DOCX: só pdf_to_md/doc_to_md recebem o
+    modo; outros formatos ganham um aviso, não erro.
+
+    `visao` (opt-in do LLM com visão) vai só para pdf_to_md e image_to_md.
     """
     sufixo = origem.suffix.lower()
     conversor = next(
@@ -157,7 +163,7 @@ def _converter_arquivo(
     if conversor is pdf_to_md:
         return _pdf_to_md(
             origem, ignorar_margens, modo_imagem,
-            destino, obsidian, assets_dir_str, avisos,
+            destino, obsidian, assets_dir_str, avisos, visao,
         )
     if conversor is doc_to_md:
         return _docx_to_md(
@@ -165,6 +171,8 @@ def _converter_arquivo(
         )
     if modo_imagem != ModoImagem.transcrever and avisos is not None:
         avisos.append("--imagens só se aplica a PDF e DOCX — modo ignorado para este arquivo")
+    if conversor is image_to_md:
+        return image_to_md(origem, visao=visao)
     return conversor(origem)
 
 
@@ -232,13 +240,15 @@ def _pdf_to_md(
     obsidian: bool,
     assets_dir_str: str | None,
     avisos: list[str] | None,
+    visao: ConfigLLM | None = None,
 ) -> str:
     """Chama pdf_to_md com os assets resolvidos (default byte-idêntico)."""
     if modo_imagem == ModoImagem.transcrever:
-        return pdf_to_md(origem, ignorar_margens=ignorar_margens)
+        return pdf_to_md(origem, ignorar_margens=ignorar_margens, visao=visao)
     return pdf_to_md(
         origem,
         ignorar_margens=ignorar_margens,
+        visao=visao,
         **_kwargs_assets(origem, modo_imagem, destino, obsidian, assets_dir_str, avisos),
     )
 
@@ -284,7 +294,7 @@ def _resultado_erro(origem_str: str, exc: Exception) -> dict[str, Any]:
 
 
 def batch_convert(
-    origem: Path,
+    origem: Path | list[Path],
     destino: Path,
     workers: int = 4,
     sobrescrever: bool = False,
@@ -296,39 +306,50 @@ def batch_convert(
     llm_config: ConfigLLM | None = None,
     modo_imagem: ModoImagem = ModoImagem.transcrever,
     assets_dir: Path | None = None,
+    ao_iniciar: Callable[[Path], None] | None = None,
+    ao_concluir: Callable[[ResultadoArquivo], None] | None = None,
 ) -> list[ResultadoArquivo]:
     """
     Converte todos os arquivos suportados em `origem` para Markdown em `destino`.
 
     Comportamento:
     - Se `origem` é arquivo único: processa só ele
-    - Se `origem` é diretório: varre recursivamente (não recursivo por padrão — só nível raiz)
+    - Se `origem` é diretório: processa só o nível raiz (não recursivo)
+    - Se `origem` é lista: ela é o conjunto de arquivos (uma única chamada
+      converte tudo, com dedup de nome e paralelismo). Ausente ou diretório
+      vira ERRO naquele item; o restante do lote segue.
     - Arquivos com extensão não suportada: StatusArquivo.IGNORADO (sem erro)
     - `sobrescrever=False`: pula arquivos já existentes no destino
     - `vault` definido: output vai direto para `vault/` (cria se não existir)
     - `obsidian=True` (ou vault definido): aplica frontmatter antes de salvar
     - Paraleliza via `concurrent.futures.ThreadPoolExecutor(max_workers=workers)`
     - Erros individuais não interrompem o batch — capturados em ResultadoArquivo.erro
+    - `ao_iniciar(origem)` roda na thread do worker, ao começar cada arquivo
+    - `ao_concluir(resultado)` roda na thread chamadora, uma vez por arquivo
+      (inclusive IGNORADO e os ERRO de lista ausente)
 
     Args:
-        origem: Arquivo ou diretório de entrada.
+        origem: Arquivo, diretório ou lista de arquivos de entrada.
         destino: Diretório de saída (criado se não existir). Ignorado se vault definido.
-        workers: Número de processos paralelos.
+        workers: Número de threads paralelas.
         sobrescrever: Se True, sobrescreve MDs existentes.
         vault: Path para raiz do Obsidian vault. Output vai direto para vault/.
         obsidian: Se True, adiciona frontmatter Obsidian ao MD gerado.
+        ao_iniciar: Callback de progresso ao iniciar cada arquivo (worker).
+        ao_concluir: Callback de progresso ao concluir cada arquivo.
 
     Returns:
         Lista de ResultadoArquivo com status de cada arquivo processado.
 
     Raises:
-        FileNotFoundError: Se `origem` não existe.
+        FileNotFoundError: Se `origem` (Path) não existe.
         NotADirectoryError: Se `vault` definido mas não é diretório.
     """
-    validar_path_seguro(origem)
+    if isinstance(origem, Path):
+        validar_path_seguro(origem)
 
-    if not origem.exists():
-        raise FileNotFoundError(f"Origem não encontrada: {origem.name}")
+        if not origem.exists():
+            raise FileNotFoundError(f"Origem não encontrada: {origem.name}")
 
     if vault is not None:
         if not vault.is_dir():
@@ -339,36 +360,55 @@ def batch_convert(
     destino.mkdir(parents=True, exist_ok=True)
 
     arquivos = _coletar_arquivos(origem)
-    tarefas, resultados = _preparar_tarefas(arquivos, destino)
+    tarefas, resultados = _preparar_tarefas(
+        arquivos, destino, lista_explicita=isinstance(origem, list),
+    )
+    if ao_concluir is not None:
+        for descartado in resultados:
+            ao_concluir(descartado)
     resultados.extend(_executar_paralelo(
         tarefas, workers, obsidian, sobrescrever, usar_llm, llm_fallback,
         ignorar_margens, llm_config, modo_imagem, assets_dir,
+        ao_iniciar, ao_concluir,
     ))
 
     return resultados
 
 
-def _coletar_arquivos(origem: Path) -> list[Path]:
-    """Coleta arquivos da origem (arquivo único ou diretório) e valida traversal."""
-    arquivos = [origem] if origem.is_file() else sorted(origem.iterdir())
+def _coletar_arquivos(origem: Path | list[Path]) -> list[Path]:
+    """Coleta arquivos da origem (arquivo único, diretório ou lista) e valida traversal."""
+    if isinstance(origem, list):
+        arquivos = list(origem)
+    else:
+        arquivos = [origem] if origem.is_file() else sorted(origem.iterdir())
     for arq in arquivos:
         validar_path_seguro(arq)
     return arquivos
 
 
 def _preparar_tarefas(
-    arquivos: list[Path], destino: Path
+    arquivos: list[Path], destino: Path, lista_explicita: bool = False,
 ) -> tuple[list[tuple[Path, Path]], list[ResultadoArquivo]]:
-    """Separa arquivos suportados (tarefas) de não-suportados (ignorados)."""
+    """Separa arquivos suportados (tarefas) de não-suportados (ignorados).
+
+    Com `lista_explicita` (origem é lista), ausente ou diretório vira ERRO
+    em vez de ser pulado em silêncio — o chamador pediu aquele arquivo.
+    """
     tarefas: list[tuple[Path, Path]] = []
-    ignorados: list[ResultadoArquivo] = []
+    descartados: list[ResultadoArquivo] = []
     nomes_usados: set[str] = set()
 
     for arq in arquivos:
+        if lista_explicita and not arq.is_file():
+            descartados.append(ResultadoArquivo(
+                origem=arq, destino=None, status=StatusArquivo.ERRO,
+                erro=sanitizar_mensagem_erro(f"Arquivo não encontrado: {arq.name}"),
+            ))
+            continue
         if arq.is_dir():
             continue
         if arq.suffix.lower() not in EXTENSOES_PERMITIDAS:
-            ignorados.append(ResultadoArquivo(
+            descartados.append(ResultadoArquivo(
                 origem=arq, destino=None, status=StatusArquivo.IGNORADO, erro=None,
             ))
             continue
@@ -376,7 +416,7 @@ def _preparar_tarefas(
         nomes_usados.add(nome_md)
         tarefas.append((arq, destino / nome_md))
 
-    return tarefas, ignorados
+    return tarefas, descartados
 
 
 def _executar_paralelo(
@@ -390,6 +430,8 @@ def _executar_paralelo(
     llm_config: ConfigLLM | None = None,
     modo_imagem: ModoImagem = ModoImagem.transcrever,
     assets_dir: Path | None = None,
+    ao_iniciar: Callable[[Path], None] | None = None,
+    ao_concluir: Callable[[ResultadoArquivo], None] | None = None,
 ) -> list[ResultadoArquivo]:
     """Executa conversões em paralelo via ThreadPoolExecutor e coleta resultados."""
     if not tarefas:
@@ -397,17 +439,22 @@ def _executar_paralelo(
 
     resultados_por_idx: dict[int, ResultadoArquivo] = {}
 
+    def _trabalhar(arq: Path, dest: Path) -> dict[str, Any]:
+        # Roda na thread do worker: avisa o início antes da conversão.
+        if ao_iniciar is not None:
+            ao_iniciar(arq)
+        return _processar_arquivo(
+            str(arq), str(dest), obsidian, sobrescrever,
+            usar_llm, llm_fallback, ignorar_margens,
+            llm_config,
+            modo_imagem, str(assets_dir) if assets_dir else None,
+        )
+
     with ThreadPoolExecutor(max_workers=workers) as executor:
         # Dict future → índice original: `as_completed` devolve na ordem de
         # conclusão, mas a tabela do CLI deve seguir a ordem de entrada.
         futures = {
-            executor.submit(
-                _processar_arquivo,
-                str(arq), str(dest), obsidian, sobrescrever,
-                usar_llm, llm_fallback, ignorar_margens,
-                llm_config,
-                modo_imagem, str(assets_dir) if assets_dir else None,
-            ): idx
+            executor.submit(_trabalhar, arq, dest): idx
             for idx, (arq, dest) in enumerate(tarefas)
         }
 
@@ -418,7 +465,7 @@ def _executar_paralelo(
             arq, _ = tarefas[idx]
             try:
                 res = future.result()
-                resultados_por_idx[idx] = ResultadoArquivo(
+                resultado = ResultadoArquivo(
                     origem=Path(res["origem"]),
                     destino=Path(res["destino"]) if res["destino"] else None,
                     status=StatusArquivo(res["status"]),
@@ -426,11 +473,14 @@ def _executar_paralelo(
                     avisos=res.get("avisos", []),
                 )
             except Exception as exc:
-                resultados_por_idx[idx] = ResultadoArquivo(
+                resultado = ResultadoArquivo(
                     origem=arq,
                     destino=None,
                     status=StatusArquivo.ERRO,
                     erro=sanitizar_mensagem_erro(str(exc)),
                 )
+            resultados_por_idx[idx] = resultado
+            if ao_concluir is not None:
+                ao_concluir(resultado)
 
     return [resultados_por_idx[i] for i in range(len(tarefas))]

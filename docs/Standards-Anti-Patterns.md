@@ -58,7 +58,7 @@ grep -n "subprocess.run" core/
 | Binário | Resolver | Arquivo |
 |---------|----------|---------|
 | `tesseract` | `_configurar_tesseract_cmd()` | `core/image_converter.py` |
-| `antiword` | `_resolver_antiword()` | `core/doc_converter.py` |
+| `textutil` | path absoluto fixo `/usr/bin/textutil` (nativo do macOS, sem resolver) | `core/doc_converter.py` |
 
 ---
 
@@ -171,7 +171,7 @@ PyMuPDF (fitz) escreve diretamente no **fd 1 nativo** via C. Resultado: linhas
 como `"Using Tesseract for OCR processing."` aparecem no stdout mesmo com
 `redirect_stdout` ativo — corrompe o protocolo JSON da GUI.
 
-### Padrão canônico (`_silenciar_stdout_nativo` em `core/converter.py`)
+### Padrão canônico (`_silenciar_stdout_nativo` em `core/cli.py`)
 
 ```python
 import os, contextlib
@@ -197,7 +197,7 @@ def _silenciar_stdout_nativo():
 Desambiguação só por `stem` → `a.pdf` + `a.docx` → dois workers escrevem em
 `a.md` concorrentemente → o último vence, o primeiro se perde silenciosamente.
 
-### Padrão canônico (em `batch.py`)
+### Padrão canônico (`_nome_destino_unico` em `batch.py` — o 1º arquivo mantém `<stem>.md`)
 
 ```python
 def _nome_saida(arq: Path, usados: set[str]) -> str:

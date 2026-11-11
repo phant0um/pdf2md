@@ -7,7 +7,7 @@
 useDefault = true
 
 [allowlist]
-description = "Strings de segredo intencionais em testes (CWE-209/522/522)"
+description = "Strings de segredo intencionais em testes (CWE-209/532/522)"
 
 paths = [
   "tests/test_llm_enhancer.py",
