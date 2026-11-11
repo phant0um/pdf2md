@@ -1,5 +1,7 @@
 # Revisão Fullstack Agent System — pdf2md v0.6.0 (2026-08-13)
 
+> Snapshot de agosto de 2026, arquivado em 2026-11-10 — não reflete o estado atual do código.
+
 > Revisão orquestrada pelo Maestro (fullstack-agent-system) com 5 especialistas em paralelo:
 > stratum (backend), facet (frontend), sentinel (security), bastion (infra/CI), probe (QA).
 > Escopo: working tree no branch main (3 Swift modificados sem commit + docs de auditoria untracked).

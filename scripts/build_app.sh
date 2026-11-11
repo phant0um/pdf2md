@@ -14,6 +14,7 @@
 # deps em .venv/) e Command Line Tools (swiftc, hdiutil, codesign).
 #
 # Uso: ./scripts/build_app.sh
+#      PDF2MD_SDK=<caminho.sdk> ./scripts/build_app.sh   (força o SDK do swiftc)
 set -euo pipefail
 
 # ── Paths base (derivados, nunca hardcoded) ─────────────────────────────────
@@ -40,30 +41,67 @@ BUILD_NUM="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 
 echo "▶ pdf2md build — versão ${VERSAO} (build ${BUILD_NUM})"
 
-# ── 1. PyInstaller: binário Python one-file ─────────────────────────────────
-# pymupdf precisa dos resources de layout embarcados (senão FileNotFoundError
-# em runtime no binário congelado).
-PYMUPDF_RES="$("${PYTHON_BIN}" -c "import pymupdf, os; print(os.path.join(os.path.dirname(pymupdf.__file__), 'layout', 'resources'))")"
-if [[ ! -d "${PYMUPDF_RES}" ]]; then
-    echo "✗ resources do pymupdf não encontrados: ${PYMUPDF_RES}" >&2
+# ── SDK do swiftc ───────────────────────────────────────────────────────────
+# Com só Command Line Tools, o SDK padrão pode declarar as macros do SwiftUI
+# (@State etc.) sem o plugin SwiftUIMacros do compilador: o swiftc falha em
+# código inalterado. SDKs versionados no mesmo CLT (ex.: MacOSX26.5.sdk)
+# compilam a GUI. Escolhe-se o primeiro SDK que passa numa sonda de typecheck,
+# ANTES do PyInstaller (minutos), para falhar cedo.
+SONDA_DIR="${BUILD}/sonda-sdk"
+mkdir -p "${SONDA_DIR}"
+SONDA="${SONDA_DIR}/Sonda.swift"
+cat > "${SONDA}" <<'SWIFT'
+import SwiftUI
+struct Sonda: View {
+    @State private var n = 0
+    var body: some View { Text("\(n)") }
+}
+SWIFT
+
+SDK_PADRAO="$(xcrun --show-sdk-path)"
+CANDIDATOS=()
+if [[ -n "${PDF2MD_SDK:-}" ]]; then
+    # Override explícito: sem fallback, se falhar o build para
+    CANDIDATOS=("${PDF2MD_SDK}")
+else
+    CANDIDATOS=("${SDK_PADRAO}")
+    # SDKs versionados vizinhos ao padrão, do mais novo para o mais antigo
+    VERSIONADOS="$(ls -d "$(dirname "${SDK_PADRAO}")"/MacOSX[0-9]*.sdk 2>/dev/null | sort -V -r || true)"
+    while IFS= read -r s; do
+        [[ -n "${s}" ]] && CANDIDATOS+=("${s}")
+    done <<< "${VERSIONADOS}"
+fi
+
+SWIFT_SDK=""
+for c in "${CANDIDATOS[@]}"; do
+    if swiftc -parse-as-library -typecheck -target arm64-apple-macos13 \
+        -sdk "${c}" "${SONDA}" >/dev/null 2>&1; then
+        SWIFT_SDK="${c}"
+        break
+    fi
+done
+
+if [[ -z "${SWIFT_SDK}" ]]; then
+    if [[ -n "${PDF2MD_SDK:-}" ]]; then
+        echo "✗ PDF2MD_SDK=${PDF2MD_SDK} não compila a GUI SwiftUI" >&2
+    else
+        echo "✗ nenhum SDK instalado compila a GUI SwiftUI" >&2
+        echo "  Instale o Xcode, ou atualize o CLT (xcode-select --install)," >&2
+        echo "  ou aponte um SDK com PDF2MD_SDK=<caminho.sdk>" >&2
+    fi
     exit 1
 fi
 
-echo "▶ [1/5] PyInstaller → dist/pdf2md"
-"${PYTHON_BIN}" -m PyInstaller core/cli.py \
-    --onefile \
-    --name pdf2md \
-    --add-data "${PYMUPDF_RES}:pymupdf/layout/resources" \
-    --collect-submodules pymupdf4llm \
-    --collect-submodules mammoth \
-    --hidden-import pillow_heif \
-    --distpath "${DIST}" \
-    --workpath "${BUILD}/pyinstaller" \
-    --specpath "${BUILD}" \
-    --noconfirm \
-    --clean
+echo "▶ SDK do swiftc: $(basename "${SWIFT_SDK}")"
+# Resolve symlinks (MacOSX.sdk → MacOSX27.2.sdk) para comparar com o padrão
+if [[ "$(cd -P "${SWIFT_SDK}" && pwd -P)" != "$(cd -P "${SDK_PADRAO}" && pwd -P)" ]]; then
+    echo "  ⚠ SDK padrão sem suporte a macros do SwiftUI — usando $(basename "${SWIFT_SDK}")" >&2
+fi
 
-[[ -f "${DIST}/pdf2md" ]] || { echo "✗ binário pdf2md não gerado" >&2; exit 1; }
+# ── 1. PyInstaller: binário Python one-file ─────────────────────────────────
+# Flags em scripts/pyinstaller_cli.sh (fonte única, compartilhada com o CI).
+echo "▶ [1/5] PyInstaller → dist/pdf2md"
+PYTHON_BIN="${PYTHON_BIN}" "${RAIZ}/scripts/pyinstaller_cli.sh" "${DIST}" "${BUILD}"
 
 # ── 2. swiftc: executável da GUI ────────────────────────────────────────────
 echo "▶ [2/5] swiftc → PDF2MD (executável SwiftUI)"
@@ -72,6 +110,7 @@ mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
 
 swiftc -parse-as-library -O \
     -target arm64-apple-macos13 \
+    -sdk "${SWIFT_SDK}" \
     gui/PDF2MD/PDF2MDApp.swift \
     gui/PDF2MD/ContentView.swift \
     gui/PDF2MD/BatchProcessor.swift \

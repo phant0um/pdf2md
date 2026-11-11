@@ -1,5 +1,7 @@
 # Auditoria do projeto pdf2md — 2026-08-05
 
+> Snapshot de agosto de 2026, arquivado em 2026-11-10 — não reflete o estado atual do código.
+
 > Orquestrador: fullstack-agent-system/orchestrator (4 subagentes paralelos:
 > segurança, build/deps/CI, código/arquitetura, GUI/processo).
 > Verificação adicional: binário PyInstaller, pip-audit, detect-secrets.
