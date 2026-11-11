@@ -20,6 +20,8 @@ Versioning follows [SemVer](https://semver.org/).
 
 ### Fixed
 
+- A troca do home por `~` não respeitava o fim do segmento (home `/Users/al`
+  transformava `/Users/alice/x.pdf` em `~ice/x.pdf`); home `/` agora é ignorado.
 - Mensagens de erro com `/Users/<nome>` perdiam a palavra seguinte
   (`"/Users/bob não encontrado"` virava `"[user] encontrado"`); agora só nomes
   de contas locais com espaço são redigidos inteiros.

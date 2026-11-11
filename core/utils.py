@@ -35,6 +35,11 @@ _RE_PATH_ABSOLUTO = re.compile(
 # Diretório de contas locais do macOS. Monkeypatchado nos testes.
 _DIR_USUARIOS = Path("/Users")
 
+# Lookahead de fim de segmento de path: o match só vale se o próximo caractere
+# fecha o segmento (barra, espaço, delimitador de mensagem ou fim de string).
+# Impede que "/Users/al" case o prefixo de "/Users/alice".
+_FIM_SEGMENTO = r"(?=[/\s:'\"),.;]|$)"
+
 # Extensões suportadas — fonte única da verdade (converters importam daqui)
 EXTENSOES_PDF: frozenset[str] = frozenset({".pdf"})
 EXTENSOES_IMAGEM: frozenset[str] = frozenset({
@@ -180,15 +185,17 @@ def sanitizar_mensagem_erro(msg: str) -> str:
         Mensagem com paths absolutos substituídos pelo basename (ou por
         "~/..." quando o path está dentro do home do usuário).
     """
+    # O match para no fim do segmento (home "/Users/al" não toca "/Users/alice").
+    # Home "/" é ignorado: trocaria toda barra do path por "~".
     home = str(Path.home())
-    if home and home in msg:
-        msg = msg.replace(home, "~")
+    if home and home != "/" and home in msg:
+        msg = re.sub(re.escape(home) + _FIM_SEGMENTO, "~", msg)
 
     # Contas locais com espaço no nome: "/Users/John Doe" vira "/Users/[user]"
     # antes da regex, para o espaço não ser lido como fim de path.
     if "/Users/" in msg:
         for nome in _usuarios_com_espaco():
-            padrao = re.escape("/Users/" + nome) + r"(?=[/\s:'\"),.;]|$)"
+            padrao = re.escape("/Users/" + nome) + _FIM_SEGMENTO
             msg = re.sub(padrao, "/Users/[user]", msg)
 
     def _substituir(m: re.Match[str]) -> str:

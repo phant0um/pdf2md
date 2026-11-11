@@ -149,6 +149,45 @@ def test_sanitiza_path_home_com_espaco_no_segmento_subsequente():
     )
 
 
+def _home_falso(monkeypatch, caminho: str) -> None:
+    """Simula Path.home() devolvendo `caminho`; restaurado pelo monkeypatch."""
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path(caminho)))
+    monkeypatch.setattr("core.utils._usuarios_com_espaco", lambda: [])
+
+
+def test_home_curto_nao_troca_prefixo_de_outro_usuario(monkeypatch):
+    """Home "/Users/al" não pode virar "~ice" em "/Users/alice" (fim de segmento)."""
+    _home_falso(monkeypatch, "/Users/al")
+    resultado = sanitizar_mensagem_erro("erro em /Users/alice/doc/x.pdf")
+    assert resultado == "erro em x.pdf"
+    assert "~" not in resultado
+    assert "ice" not in resultado
+
+
+def test_home_curto_troca_home_real_por_til(monkeypatch):
+    """Home "/Users/al" seguido de barra é reduzido a "~/..."."""
+    _home_falso(monkeypatch, "/Users/al")
+    assert sanitizar_mensagem_erro("erro em /Users/al/doc/x.pdf") == "erro em ~/doc/x.pdf"
+
+
+def test_home_curto_no_fim_da_mensagem_vira_til(monkeypatch):
+    """Home sem nada depois (fim de string) também é trocado por "~"."""
+    _home_falso(monkeypatch, "/Users/al")
+    assert sanitizar_mensagem_erro("sem acesso: /Users/al") == "sem acesso: ~"
+
+
+def test_home_curto_antes_de_dois_pontos_vira_til(monkeypatch):
+    """Dois-pontos fecha o segmento: home vira "~" também antes de ":"."""
+    _home_falso(monkeypatch, "/Users/al")
+    assert sanitizar_mensagem_erro("erro em /Users/al: negado") == "erro em ~: negado"
+
+
+def test_home_raiz_nao_troca_barras_por_til(monkeypatch):
+    """Home "/" (daemons, sandboxes) é ignorado: não pode virar "~" em toda barra."""
+    _home_falso(monkeypatch, "/")
+    assert sanitizar_mensagem_erro("erro em /etc/passwd") == "erro em passwd"
+
+
 def test_sanitiza_path_username_com_espaco_dentro_do_home_preservado():
     """
     Cenário do PoC do bloqueador #3, mas com o "home" simulado contendo
