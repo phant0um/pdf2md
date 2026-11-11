@@ -12,6 +12,10 @@ Versioning follows [SemVer](https://semver.org/).
 
 ### Changed
 
+- GUI converte a lista inteira em um único processo (workers paralelos, dedup
+  de mesmo stem como `a.md` / `a-docx.md`), com progresso emitido por arquivo
+  durante a execução. Antes, um processo por arquivo, em sequência. CLI aceita
+  `-` como ORIGEM: lista NUL-separada no stdin (protocolo interno da GUI).
 - OCR por visão do LLM (fallback do Tesseract com menos de 10 caracteres) só roda
   com `--llm` ou `--llm-fallback` e usa o mesmo `--llm-url`/`--llm-modelo`. Antes
   rodava sempre que `PDF2MD_LLM_URL` estava definida, enviando imagens e páginas
