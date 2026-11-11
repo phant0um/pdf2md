@@ -82,8 +82,8 @@ def _nome_destino_unico(arq: Path, usados: set[str]) -> str:
 
 
 def _processar_arquivo(
-    origem_str: str,
-    destino_str: str,
+    origem: Path,
+    destino: Path,
     obsidian: bool,
     sobrescrever: bool,
     usar_llm: bool = False,
@@ -91,17 +91,14 @@ def _processar_arquivo(
     ignorar_margens: float = 0.0,
     llm_config: ConfigLLM | None = None,
     modo_imagem: ModoImagem = ModoImagem.transcrever,
-    assets_dir_str: str | None = None,
-) -> dict[str, Any]:
+    assets_dir: Path | None = None,
+) -> ResultadoArquivo:
     """
-    Worker executado em ThreadPoolExecutor. Recebe/retorna tipos simples
-    (strings, dict) para uma fronteira de dados limpa entre as threads.
+    Worker executado em worker thread (ThreadPoolExecutor). Roda na thread
+    e nunca lança exceção: erros viram ResultadoArquivo com status ERRO.
     """
-    origem = Path(origem_str)
-    destino = Path(destino_str)
-
     if not sobrescrever and destino.exists():
-        return _resultado_ignorado(origem_str, destino_str)
+        return _resultado_ignorado(origem, destino)
 
     # LLM com visão só com opt-in explícito (--llm / --llm-fallback); sem ele, None.
     visao = (llm_config or ConfigLLM()) if (usar_llm or llm_fallback) else None
@@ -110,10 +107,10 @@ def _processar_arquivo(
         avisos_imagens: list[str] = []
         md = _converter_arquivo(
             origem, ignorar_margens, modo_imagem, destino,
-            obsidian, assets_dir_str, avisos_imagens, visao,
+            obsidian, assets_dir, avisos_imagens, visao,
         )
         if md is None:
-            return _resultado_ignorado(origem_str, None)
+            return _resultado_ignorado(origem, None)
         md, avisos = aplicar_pipeline_qualidade(
             md, origem, usar_llm, llm_fallback, llm_config
         )
@@ -125,15 +122,15 @@ def _processar_arquivo(
         destino.parent.mkdir(parents=True, exist_ok=True)
         destino.write_text(md, encoding="utf-8")
 
-        return {
-            "origem": origem_str,
-            "destino": destino_str,
-            "status": StatusArquivo.CONCLUIDO.value,
-            "erro": None,
-            "avisos": avisos,
-        }
+        return ResultadoArquivo(
+            origem=origem,
+            destino=destino,
+            status=StatusArquivo.CONCLUIDO,
+            erro=None,
+            avisos=avisos,
+        )
     except Exception as exc:
-        return _resultado_erro(origem_str, exc)
+        return _resultado_erro(origem, exc)
 
 
 def _converter_arquivo(
@@ -142,7 +139,7 @@ def _converter_arquivo(
     modo_imagem: ModoImagem = ModoImagem.transcrever,
     destino: Path | None = None,
     obsidian: bool = False,
-    assets_dir_str: str | None = None,
+    assets_dir: Path | None = None,
     avisos: list[str] | None = None,
     visao: ConfigLLM | None = None,
 ) -> str | None:
@@ -163,11 +160,11 @@ def _converter_arquivo(
     if conversor is pdf_to_md:
         return _pdf_to_md(
             origem, ignorar_margens, modo_imagem,
-            destino, obsidian, assets_dir_str, avisos, visao,
+            destino, obsidian, assets_dir, avisos, visao,
         )
     if conversor is doc_to_md:
         return _docx_to_md(
-            origem, modo_imagem, destino, obsidian, assets_dir_str, avisos
+            origem, modo_imagem, destino, obsidian, assets_dir, avisos
         )
     if modo_imagem != ModoImagem.transcrever and avisos is not None:
         avisos.append("--imagens só se aplica a PDF e DOCX — modo ignorado para este arquivo")
@@ -177,7 +174,7 @@ def _converter_arquivo(
 
 
 def _resolver_assets(
-    origem: Path, destino: Path | None, obsidian: bool, assets_dir_str: str | None
+    origem: Path, destino: Path | None, obsidian: bool, assets_dir: Path | None
 ) -> tuple[Path, str]:
     """
     Resolve o destino dos assets (D1) e o prefixo de nomes.
@@ -192,8 +189,8 @@ def _resolver_assets(
     No batch, `destino` é o caminho do .md (arquivo) — o diretório é .parent.
     """
     destino_efetivo = destino.parent if destino else origem.parent
-    if assets_dir_str:
-        return Path(assets_dir_str), _prefixo_seguro(destino, origem)
+    if assets_dir is not None:
+        return assets_dir, _prefixo_seguro(destino, origem)
     if obsidian:
         return destino_efetivo / "attachments", _prefixo_seguro(destino, origem)
     return destino_efetivo / f"{origem.stem}_assets", ""
@@ -217,11 +214,11 @@ def _kwargs_assets(
     modo_imagem: ModoImagem,
     destino: Path | None,
     obsidian: bool,
-    assets_dir_str: str | None,
+    assets_dir: Path | None,
     avisos: list[str] | None,
 ) -> dict[str, Any]:
     """Kwargs comuns de `--imagens` para os conversores (D1 + prefixo)."""
-    assets, prefixo = _resolver_assets(origem, destino, obsidian, assets_dir_str)
+    assets, prefixo = _resolver_assets(origem, destino, obsidian, assets_dir)
     return {
         "modo_imagem": modo_imagem,
         "assets_dir": assets,
@@ -238,7 +235,7 @@ def _pdf_to_md(
     modo_imagem: ModoImagem,
     destino: Path | None,
     obsidian: bool,
-    assets_dir_str: str | None,
+    assets_dir: Path | None,
     avisos: list[str] | None,
     visao: ConfigLLM | None = None,
 ) -> str:
@@ -249,7 +246,7 @@ def _pdf_to_md(
         origem,
         ignorar_margens=ignorar_margens,
         visao=visao,
-        **_kwargs_assets(origem, modo_imagem, destino, obsidian, assets_dir_str, avisos),
+        **_kwargs_assets(origem, modo_imagem, destino, obsidian, assets_dir, avisos),
     )
 
 
@@ -258,7 +255,7 @@ def _docx_to_md(
     modo_imagem: ModoImagem,
     destino: Path | None,
     obsidian: bool,
-    assets_dir_str: str | None,
+    assets_dir: Path | None,
     avisos: list[str] | None,
 ) -> str:
     """Chama doc_to_md com os assets resolvidos (default descarta imagens)."""
@@ -266,31 +263,30 @@ def _docx_to_md(
         return doc_to_md(origem)
     return doc_to_md(
         origem,
-        **_kwargs_assets(origem, modo_imagem, destino, obsidian, assets_dir_str, avisos),
+        **_kwargs_assets(origem, modo_imagem, destino, obsidian, assets_dir, avisos),
     )
 
 
-def _resultado_ignorado(origem_str: str, destino_str: str | None) -> dict[str, Any]:
-    """Retorna dict de resultado para arquivo ignorado (destino já existe ou extensão não suportada)."""
-    return {
-        "origem": origem_str,
-        "destino": destino_str,
-        "status": StatusArquivo.IGNORADO.value,
-        "erro": None,
-        "avisos": [],
-    }
+def _resultado_ignorado(origem: Path, destino: Path | None) -> ResultadoArquivo:
+    """Resultado de arquivo ignorado (destino já existe ou extensão não suportada)."""
+    return ResultadoArquivo(
+        origem=origem,
+        destino=destino,
+        status=StatusArquivo.IGNORADO,
+        erro=None,
+        avisos=[],
+    )
 
 
-def _resultado_erro(origem_str: str, exc: Exception) -> dict[str, Any]:
-    """Retorna dict de resultado para arquivo com erro (path sanitizado)."""
-    msg = sanitizar_mensagem_erro(str(exc))
-    return {
-        "origem": origem_str,
-        "destino": None,
-        "status": StatusArquivo.ERRO.value,
-        "erro": msg,
-        "avisos": [],
-    }
+def _resultado_erro(origem: Path, exc: Exception) -> ResultadoArquivo:
+    """Resultado de arquivo com erro (mensagem sanitizada)."""
+    return ResultadoArquivo(
+        origem=origem,
+        destino=None,
+        status=StatusArquivo.ERRO,
+        erro=sanitizar_mensagem_erro(str(exc)),
+        avisos=[],
+    )
 
 
 def batch_convert(
@@ -439,15 +435,15 @@ def _executar_paralelo(
 
     resultados_por_idx: dict[int, ResultadoArquivo] = {}
 
-    def _trabalhar(arq: Path, dest: Path) -> dict[str, Any]:
+    def _trabalhar(arq: Path, dest: Path) -> ResultadoArquivo:
         # Roda na thread do worker: avisa o início antes da conversão.
         if ao_iniciar is not None:
             ao_iniciar(arq)
         return _processar_arquivo(
-            str(arq), str(dest), obsidian, sobrescrever,
+            arq, dest, obsidian, sobrescrever,
             usar_llm, llm_fallback, ignorar_margens,
             llm_config,
-            modo_imagem, str(assets_dir) if assets_dir else None,
+            modo_imagem, assets_dir,
         )
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -464,14 +460,7 @@ def _executar_paralelo(
             idx = futures[future]
             arq, _ = tarefas[idx]
             try:
-                res = future.result()
-                resultado = ResultadoArquivo(
-                    origem=Path(res["origem"]),
-                    destino=Path(res["destino"]) if res["destino"] else None,
-                    status=StatusArquivo(res["status"]),
-                    erro=res["erro"],
-                    avisos=res.get("avisos", []),
-                )
+                resultado = future.result()
             except Exception as exc:
                 resultado = ResultadoArquivo(
                     origem=arq,
