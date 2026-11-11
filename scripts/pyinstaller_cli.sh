@@ -9,6 +9,9 @@
 # Uso: scripts/pyinstaller_cli.sh <distpath> <buildpath>
 #      PYTHON_BIN=<python> scripts/pyinstaller_cli.sh dist build
 #
+# Caminhos relativos são resolvidos a partir do cwd de quem chama (não da raiz
+# do repo), então `dist` aqui é o `dist` onde você está.
+#
 # Sem PYTHON_BIN usa `python` do PATH (no CI, `uv run` coloca o python do venv
 # primeiro no PATH).
 set -euo pipefail
@@ -18,12 +21,15 @@ if [[ $# -ne 2 ]]; then
     exit 2
 fi
 
+# Caminhos relativos são relativos ao cwd de quem chama, então viram absolutos
+# ANTES do `cd` para a raiz do repo.
+case "$1" in /*) DIST="$1" ;; *) DIST="$PWD/$1" ;; esac
+case "$2" in /*) BUILD="$2" ;; *) BUILD="$PWD/$2" ;; esac
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RAIZ="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${RAIZ}"
 
-DIST="$1"
-BUILD="$2"
 PY="${PYTHON_BIN:-python}"
 
 # pymupdf precisa dos resources de layout embarcados (senão FileNotFoundError

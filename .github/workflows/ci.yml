@@ -7,9 +7,11 @@ on:
     branches: [main]
   pull_request:
 
-# Push novo no mesmo PR cancela o run anterior; em main cada push roda inteiro.
+# PR: push novo cancela o run anterior do mesmo PR. Push: cada commit tem grupo
+# próprio (SHA), pois o GitHub cancela run pendente do mesmo grupo mesmo com
+# cancel-in-progress false — agrupar por ref faria o push do meio nunca rodar.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # FIX 3: escopo mínimo do GITHUB_TOKEN — leitura de conteúdo apenas.

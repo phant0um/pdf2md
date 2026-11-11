@@ -9,7 +9,8 @@ Versioning follows [SemVer](https://semver.org/).
 
 - CI: push só em `main`, `pull_request` para qualquer base (PRs empilhados), e run
   anterior do mesmo PR cancelado. Antes cada push em branch com PR rodava o workflow
-  duas vezes. Flags do PyInstaller numa fonte única, `scripts/pyinstaller_cli.sh`,
+  duas vezes. Em PR, push novo cancela o run anterior do mesmo PR; em `main` cada
+  commit roda (grupo de concorrência por SHA). Flags do PyInstaller numa fonte única, `scripts/pyinstaller_cli.sh`,
   usada pelo CI e pelo `build_app.sh`.
 
 ### Security
