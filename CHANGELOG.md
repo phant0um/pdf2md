@@ -27,6 +27,7 @@ Versioning follows [SemVer](https://semver.org/).
   em silêncio. Agora o documento vai ao LLM em blocos cortados entre parágrafos (fora
   de blocos de código), até 20 blocos (~240 mil caracteres), com aviso quando passa
   disso ou quando um bloco falha; resposta vazia do LLM mantém o texto original.
+- `docs/adr/README.md`: índice dos ADRs; registra que a 0006 não foi usada.
 
 ### Fixed
 
@@ -41,6 +42,7 @@ Versioning follows [SemVer](https://semver.org/).
 - Linhas de CSV/XLSX com número de colunas diferente do cabeçalho geravam tabela
   inválida (colunas extras sumiam) e linha em branco virava `|  |`; agora toda
   linha tem a mesma largura e colunas vazias à direita saem.
+- GUI: o toggle "Melhorar com IA" ficava ligado (e desabilitado) quando a configuração do LLM deixava de ser válida, e a conversão mandava --llm-fallback com config incompleta; agora ele desliga e a chamada só passa a flag com config válida. Trocar só a chave nas Preferências (salvar ou apagar) também desliga o toggle.
 - `--workers 0` (ou negativo) derrubava o CLI com traceback do
   `ThreadPoolExecutor`; agora é erro de uso (`min=1`).
 - CSV com célula entre aspas contendo quebra de linha colava as palavras
