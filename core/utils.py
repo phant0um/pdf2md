@@ -36,9 +36,12 @@ _RE_PATH_ABSOLUTO = re.compile(
 _DIR_USUARIOS = Path("/Users")
 
 # Lookahead de fim de segmento de path: o match só vale se o próximo caractere
-# fecha o segmento (barra, espaço, delimitador de mensagem ou fim de string).
+# fecha o segmento (barra, espaço, aspas, dois-pontos, parêntese ou fim de string).
 # Impede que "/Users/al" case o prefixo de "/Users/alice".
-_FIM_SEGMENTO = r"(?=[/\s:'\"),.;]|$)"
+# Pontuação ("." "," ";") só fecha o segmento quando seguida de espaço ou fim de
+# string (fim de frase): dentro de nome de conta ("john.doe", "john,bob") não fecha,
+# senão o sufixo vazaria.
+_FIM_SEGMENTO = r"(?=/|[\s:'\")]|[.,;](?:\s|$)|$)"
 
 # Extensões suportadas — fonte única da verdade (converters importam daqui)
 EXTENSOES_PDF: frozenset[str] = frozenset({".pdf"})
@@ -185,18 +188,23 @@ def sanitizar_mensagem_erro(msg: str) -> str:
         Mensagem com paths absolutos substituídos pelo basename (ou por
         "~/..." quando o path está dentro do home do usuário).
     """
-    # O match para no fim do segmento (home "/Users/al" não toca "/Users/alice").
-    # Home "/" é ignorado: trocaria toda barra do path por "~".
     home = str(Path.home())
-    if home and home != "/" and home in msg:
-        msg = re.sub(re.escape(home) + _FIM_SEGMENTO, "~", msg)
 
     # Contas locais com espaço no nome: "/Users/John Doe" vira "/Users/[user]"
-    # antes da regex, para o espaço não ser lido como fim de path.
+    # antes da troca do home e da regex, para o espaço não ser lido como fim de
+    # path. Roda ANTES do home: com home "/Users/John", trocar o home primeiro
+    # deixaria " Doe" visível. A conta que é o próprio home é pulada (ela vira "~").
     if "/Users/" in msg:
         for nome in _usuarios_com_espaco():
+            if "/Users/" + nome == home:
+                continue
             padrao = re.escape("/Users/" + nome) + _FIM_SEGMENTO
             msg = re.sub(padrao, "/Users/[user]", msg)
+
+    # O match para no fim do segmento (home "/Users/al" não toca "/Users/alice").
+    # Home "/" é ignorado: trocaria toda barra do path por "~".
+    if home and home != "/" and home in msg:
+        msg = re.sub(re.escape(home) + _FIM_SEGMENTO, "~", msg)
 
     def _substituir(m: re.Match[str]) -> str:
         full = m.group(0)

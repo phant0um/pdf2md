@@ -22,6 +22,9 @@ Versioning follows [SemVer](https://semver.org/).
 
 - A troca do home por `~` não respeitava o fim do segmento (home `/Users/al`
   transformava `/Users/alice/x.pdf` em `~ice/x.pdf`); home `/` agora é ignorado.
+  `.`, `,` e `;` só fecham o segmento antes de espaço ou fim
+  (`/Users/john.doe` com home `/Users/john` vazava `.doe`), e a passada de contas
+  com espaço roda antes da troca do home.
 - Mensagens de erro com `/Users/<nome>` perdiam a palavra seguinte
   (`"/Users/bob não encontrado"` virava `"[user] encontrado"`); agora só nomes
   de contas locais com espaço são redigidos inteiros.

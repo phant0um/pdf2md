@@ -182,6 +182,46 @@ def test_home_curto_antes_de_dois_pontos_vira_til(monkeypatch):
     assert sanitizar_mensagem_erro("erro em /Users/al: negado") == "erro em ~: negado"
 
 
+def test_home_nao_vaza_sufixo_separado_por_ponto(monkeypatch):
+    """Ponto no meio do nome ("john.doe") não fecha o segmento do home "/Users/john"."""
+    _home_falso(monkeypatch, "/Users/john")
+    resultado = sanitizar_mensagem_erro("erro em /Users/john.doe/x.pdf")
+    assert resultado == "erro em x.pdf"
+    assert "doe" not in resultado
+
+
+def test_home_nao_vaza_sufixo_separado_por_virgula(monkeypatch):
+    """Vírgula no meio do nome ("john,bob") não fecha o segmento do home."""
+    _home_falso(monkeypatch, "/Users/john")
+    resultado = sanitizar_mensagem_erro("erro em /Users/john,bob/x.pdf")
+    assert resultado == "erro em x.pdf"
+    assert "bob" not in resultado
+
+
+def test_home_pontuacao_de_frase_ainda_fecha_segmento(monkeypatch):
+    """Ponto final e ponto e vírgula seguidos de espaço/fim ainda viram "~"."""
+    _home_falso(monkeypatch, "/Users/john")
+    assert sanitizar_mensagem_erro("falhou em /Users/john.") == "falhou em ~."
+    assert sanitizar_mensagem_erro("/Users/john; tente") == "~; tente"
+
+
+def test_conta_com_espaco_com_prefixo_do_home_nao_vaza_sobrenome(monkeypatch):
+    """Home "/Users/John" + conta local "John Doe": a passada de contas roda antes do home."""
+    _home_falso(monkeypatch, "/Users/John")
+    monkeypatch.setattr("core.utils._usuarios_com_espaco", lambda: ["John Doe"])
+    resultado = sanitizar_mensagem_erro("/Users/John Doe/x.pdf")
+    assert "Doe" not in resultado
+    assert "John" not in resultado
+    assert resultado == "x.pdf"
+
+
+def test_home_com_espaco_vira_til_sem_ser_redigido_como_conta(monkeypatch):
+    """Home "/Users/John Doe" (também conta local) continua virando "~", não "[user]"."""
+    _home_falso(monkeypatch, "/Users/John Doe")
+    monkeypatch.setattr("core.utils._usuarios_com_espaco", lambda: ["John Doe"])
+    assert sanitizar_mensagem_erro("/Users/John Doe/proj/x.pdf") == "~/proj/x.pdf"
+
+
 def test_home_raiz_nao_troca_barras_por_til(monkeypatch):
     """Home "/" (daemons, sandboxes) é ignorado: não pode virar "~" em toda barra."""
     _home_falso(monkeypatch, "/")
