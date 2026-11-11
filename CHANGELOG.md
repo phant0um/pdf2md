@@ -35,6 +35,10 @@ Versioning follows [SemVer](https://semver.org/).
   presa na estática.
 - `scripts/build_app.sh` abortava sem venv ativo (`VIRTUAL_ENV: unbound
   variable`); agora cai no `.venv/` do `uv sync`.
+- `scripts/build_app.sh`: só com Command Line Tools, o SDK padrão (MacOSX27.2) não
+  compila SwiftUI (plugin `SwiftUIMacros` ausente) e o build falhava no passo 2,
+  depois do PyInstaller. Uma sonda escolhe o SDK (`PDF2MD_SDK`, padrão, versionados)
+  e falha cedo.
 
 ## [0.6.1] — 2026-11-07
 
