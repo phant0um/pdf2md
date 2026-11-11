@@ -5,6 +5,11 @@ Versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- Pillow 12.3.0 → 13.0.0: 39 advisories (PYSEC-2026-4326 e seguintes) apontadas
+  pelo `pip-audit` no CI.
+
 ### Fixed
 
 - PPTX com caixa de texto comum (Inserir > Caixa de Texto) falhava inteiro com
