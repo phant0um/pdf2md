@@ -162,10 +162,10 @@ struct SettingsView: View {
                     Spacer()
                     Button("Testar") { verificarConexao(geracao: geracao + 1) }
                         .controlSize(.small)
-                        .disabled(!configurado)
+                        .disabled(!conectavel)
                 }
                 if !configurado {
-                    Text("Configure um provedor para habilitar o LLM.")
+                    Text("Configure provedor e modelo para habilitar o LLM.")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -184,6 +184,17 @@ struct SettingsView: View {
         } message: {
             Text(erroKeychain ?? "")
         }
+    }
+
+    /// Endpoint alcançável sem modelo escolhido. Lista de modelos e teste de
+    /// conexão dependem só disto: exigir modelo aqui deixava a lista dinâmica
+    /// presa na estática (trocar de provider zera o modelo).
+    private var conectavel: Bool {
+        LLMProvider.conectavel(
+            providerRaw: providerRaw,
+            urlPersonalizada: urlPersonalizada,
+            chave: chaveTratada
+        )
     }
 
     private var configurado: Bool {
@@ -233,7 +244,7 @@ struct SettingsView: View {
     }
 
     private func carregarModelos(geracao: Int) {
-        guard let url = urlResolvida, configurado else {
+        guard let url = urlResolvida, conectavel else {
             modelos = []
             modelosEstaticos = true
             carregandoModelos = false
@@ -263,7 +274,7 @@ struct SettingsView: View {
     }
 
     private func verificarConexao(geracao: Int) {
-        guard let url = urlResolvida, configurado else {
+        guard let url = urlResolvida, conectavel else {
             status = "Sem configuração"
             statusOk = nil
             return

@@ -12,7 +12,30 @@ Versioning follows [SemVer](https://semver.org/).
 
 ### Changed
 
+- OCR por visão do LLM (fallback do Tesseract com menos de 10 caracteres) só roda
+  com `--llm` ou `--llm-fallback` e usa o mesmo `--llm-url`/`--llm-modelo`. Antes
+  rodava sempre que `PDF2MD_LLM_URL` estava definida, enviando imagens e páginas
+  escaneadas para um provider remoto sem opt-in (privacidade e custo), e ignorava
+  as flags. O alt-text de `--imagens ambos` nunca vai ao LLM.
 - `.gitignore` ignorava todo `*.xml` do repositório; agora só relatórios de teste (`coverage.xml`, `junit*.xml`).
+
+### Fixed
+
+- `--workers 0` (ou negativo) derrubava o CLI com traceback do
+  `ThreadPoolExecutor`; agora é erro de uso (`min=1`).
+- CSV com célula entre aspas contendo quebra de linha colava as palavras
+  (`splitlines()` antes do `csv.reader`); CR/CRLF em células de tabela também
+  viram espaço.
+- `--llm`/`--llm-fallback`: resposta cortada em `max_tokens`
+  (`finish_reason: length`) substituía o documento por texto truncado; agora o
+  original é mantido com aviso.
+- `--imagens ambos` com `--obsidian` rodava OCR por imagem e descartava o
+  resultado (wikilink não tem alt-text).
+- GUI (Preferências): a lista de modelos do provider e o botão "Testar" exigiam
+  modelo já escolhido — trocar de provider zerava o modelo e a lista ficava
+  presa na estática.
+- `scripts/build_app.sh` abortava sem venv ativo (`VIRTUAL_ENV: unbound
+  variable`); agora cai no `.venv/` do `uv sync`.
 
 ## [0.6.1] — 2026-11-07
 

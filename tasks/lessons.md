@@ -14,9 +14,9 @@
 
 ## Backend & Core (Stratum)
 
-- `[2026-05-29] FAILURE` **Colisão de stem no batch**: `a.pdf` + `a.docx` → `a.md` colisão sob ThreadPool. Desambiguar por extensão: `{stem}-{ext}.md`. Ver `batch._nome_saida()`.
-- `[2026-05-29] FAILURE` **Decode de binário externo**: nunca `text=True` em subprocess de ferramenta legada (antiword emite Latin-1). Capturar bytes + decodificar `utf-8 → cp1252 → latin-1`. Ver `doc_converter._decodificar_bytes()`.
-- `[2026-05-29] FAILURE` **fd1 nativo vs sys.stdout**: PyMuPDF escreve no fd C-level. `redirect_stdout` Python não pega. Usar `os.dup2` para proteger protocolo JSON. Ver `converter._silenciar_stdout_nativo()`.
+- `[2026-05-29] FAILURE` **Colisão de stem no batch**: `a.pdf` + `a.docx` → `a.md` colisão sob ThreadPool. Desambiguar por extensão: `{stem}-{ext}.md`. Ver `batch._nome_destino_unico()`.
+- `[2026-05-29] FAILURE` **Decode de binário externo**: nunca `text=True` em subprocess de ferramenta legada (antiword emite Latin-1). Capturar bytes + decodificar defensivamente. Ver `doc_converter._decodificar_textutil()` (antiword substituído por textutil).
+- `[2026-05-29] FAILURE` **fd1 nativo vs sys.stdout**: PyMuPDF escreve no fd C-level. `redirect_stdout` Python não pega. Usar `os.dup2` para proteger protocolo JSON. Ver `cli._silenciar_stdout_nativo()`.
 - `[2026-05-29] PATTERN` **PDF em uma passada**: `pymupdf4llm.to_markdown(path, page_chunks=True)` uma vez, não por-página. Re-abrir+reparsear por página é O(n).
 - `[2026-08-05] CONSTRAINT` **CLI empacotada**: Typer 0.26 usa click vendored, e `invoke_without_command` não funciona como no click clássico — default-command resolvido no entry point (shim `core.cli:main`). PyInstaller executa o módulo como `__main__`: guard `if __name__` fica no FIM do módulo.
 - `[2026-09-24] PATTERN` **U+FFFD residual ≠ texto corrompido**: glifo de fórmula sem ToUnicode (Σ, `=` de pxfonts) vira U+FFFD fora de palavra. Classificar pelo vizinho: colado em letra de texto = corrupção; senão = símbolo (grego e alfanumérico matemático U+1D400–U+1D7FF contam como símbolo). Nunca adivinhar o glifo. Ver `quality.classificar_fffd()`.
