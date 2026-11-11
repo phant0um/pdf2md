@@ -17,6 +17,7 @@ Versioning follows [SemVer](https://semver.org/).
   rodava sempre que `PDF2MD_LLM_URL` estava definida, enviando imagens e páginas
   escaneadas para um provider remoto sem opt-in (privacidade e custo), e ignorava
   as flags. O alt-text de `--imagens ambos` nunca vai ao LLM.
+- `docs/adr/README.md`: índice dos ADRs; registra que a 0006 não foi usada.
 
 ### Fixed
 
