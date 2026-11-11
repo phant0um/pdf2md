@@ -17,6 +17,7 @@ Versioning follows [SemVer](https://semver.org/).
   rodava sempre que `PDF2MD_LLM_URL` estava definida, enviando imagens e páginas
   escaneadas para um provider remoto sem opt-in (privacidade e custo), e ignorava
   as flags. O alt-text de `--imagens ambos` nunca vai ao LLM.
+- `.gitignore` ignorava todo `*.xml` do repositório; agora só relatórios de teste (`coverage.xml`, `junit*.xml`).
 
 ### Fixed
 
@@ -35,6 +36,10 @@ Versioning follows [SemVer](https://semver.org/).
   presa na estática.
 - `scripts/build_app.sh` abortava sem venv ativo (`VIRTUAL_ENV: unbound
   variable`); agora cai no `.venv/` do `uv sync`.
+- `scripts/build_app.sh`: só com Command Line Tools, o SDK padrão (MacOSX27.2) não
+  compila SwiftUI (plugin `SwiftUIMacros` ausente) e o build falhava no passo 2,
+  depois do PyInstaller. Uma sonda escolhe o SDK (`PDF2MD_SDK`, padrão, versionados)
+  e falha cedo.
 - PPTX com caixa de texto comum (Inserir > Caixa de Texto) falhava inteiro com
   `ValueError: shape is not a placeholder`. Texto dentro de grupos e notas do
   orador agora entram no Markdown.
