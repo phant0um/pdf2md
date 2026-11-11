@@ -21,6 +21,20 @@ def _sem_ansi(texto: str) -> str:
     return _ANSI_RE.sub("", texto)
 
 
+def _lote_simulado(resultados):
+    """Substituto de batch_convert que reproduz os callbacks como o batch real.
+
+    No --json as linhas vão pelo fd original (não por sys.stdout), então o
+    teste lê com capfd; aqui basta disparar ao_concluir por resultado.
+    """
+    def _fake(**kwargs):
+        for res in resultados:
+            if kwargs.get("ao_concluir") is not None:
+                kwargs["ao_concluir"](res)
+        return resultados
+    return _fake
+
+
 def test_cli_help():
     """--help mostra usage e opções."""
     result = runner.invoke(app, ["converter", "--help"])
@@ -274,7 +288,7 @@ def test_cli_main_shim_nao_injeta_para_flag(monkeypatch):
 
 # ── TAREFA 1: contrato JSON / exit-codes reais do CLI ────────────────────────
 
-def test_cli_converter_json_linhas_de_status(tmp_path):
+def test_cli_converter_json_linhas_de_status(tmp_path, capfd):
     """converter --json emite 1 linha JSON por resultado (status/erro/avisos)."""
     from core.batch import ResultadoArquivo, StatusArquivo
 
@@ -302,13 +316,13 @@ def test_cli_converter_json_linhas_de_status(tmp_path):
     ]
 
     with (
-        patch("core.batch.batch_convert", return_value=resultados),
+        patch("core.batch.batch_convert", side_effect=_lote_simulado(resultados)),
         patch("core.cli.Progress"),
     ):
         result = runner.invoke(app, ["converter", str(origem), str(tmp_path), "--json"])
 
     assert result.exit_code == 0
-    linhas = [json.loads(linha) for linha in result.stdout.splitlines() if linha.strip().startswith("{")]
+    linhas = [json.loads(linha) for linha in capfd.readouterr().out.splitlines() if linha.strip().startswith("{")]
     assert len(linhas) == 4
     por_status: dict[str, list[dict]] = {}
     for linha in linhas:
@@ -325,7 +339,7 @@ def test_cli_converter_json_linhas_de_status(tmp_path):
     assert por_status["ignorado"][0]["status"] == "ignorado"
 
 
-def test_cli_converter_json_sem_traceback_extra(tmp_path):
+def test_cli_converter_json_sem_traceback_extra(tmp_path, capfd):
     """--json emite APENAS as linhas JSON no stdout (sem ruído/Progress)."""
     from core.batch import ResultadoArquivo, StatusArquivo
 
@@ -339,12 +353,12 @@ def test_cli_converter_json_sem_traceback_extra(tmp_path):
     ]
 
     with (
-        patch("core.batch.batch_convert", return_value=resultados),
+        patch("core.batch.batch_convert", side_effect=_lote_simulado(resultados)),
         patch("core.cli.Progress"),
     ):
         result = runner.invoke(app, ["converter", str(origem), str(tmp_path), "--json"])
 
-    linhas = [linha for linha in result.stdout.splitlines() if linha.strip()]
+    linhas = [linha for linha in capfd.readouterr().out.splitlines() if linha.strip()]
     assert len(linhas) == 1
     assert json.loads(linhas[0])["status"] == "concluido"
     assert "Traceback" not in result.output
@@ -557,3 +571,84 @@ def test_cli_workers_zero_rejeitado_sem_traceback(tmp_path):
     result = runner.invoke(app, ["converter", str(f), str(tmp_path / "out"), "--workers", "0"])
     assert result.exit_code == 2
     assert not isinstance(result.exception, ValueError)
+
+
+# ── ORIGEM `-` (lista NUL-separada no stdin, protocolo da GUI) ──────────────
+
+def test_indice_primeiro_posicional_hifen_e_posicional():
+    """`-` sozinho é ORIGEM posicional, não flag (default-command)."""
+    from core.cli import _indice_primeiro_posicional
+
+    assert _indice_primeiro_posicional(["pdf2md", "--obsidian", "-", "out"]) == 2
+    assert _indice_primeiro_posicional(["pdf2md", "-", "out"]) == 1
+
+
+def test_cli_main_reordena_flags_antes_do_hifen(monkeypatch):
+    """`pdf2md --obsidian - out` → `converter --obsidian - out`."""
+    from core.cli import main
+
+    chamadas = []
+    with monkeypatch.context() as m:
+        m.setattr("sys.argv", ["pdf2md", "--obsidian", "-", "out"])
+        m.setattr("core.cli.app", type("FakeApp", (), {"__call__": lambda self: chamadas.append("app")})())
+        main()
+        assert chamadas == ["app"]
+        import sys as _sys
+        assert _sys.argv == ["pdf2md", "converter", "--obsidian", "-", "out"]
+
+
+def test_cli_main_hifen_primeiro_injeta_converter(monkeypatch):
+    """`pdf2md - out --json` → `converter - out --json` (hífen não é flag)."""
+    from core.cli import main
+
+    chamadas = []
+    with monkeypatch.context() as m:
+        m.setattr("sys.argv", ["pdf2md", "-", "out", "--json"])
+        m.setattr("core.cli.app", type("FakeApp", (), {"__call__": lambda self: chamadas.append("app")})())
+        main()
+        assert chamadas == ["app"]
+        import sys as _sys
+        assert _sys.argv == ["pdf2md", "converter", "-", "out", "--json"]
+
+
+def test_cli_stdin_vazio_exit_1(tmp_path):
+    """`-` sem nenhum caminho no stdin → exit 1 com mensagem, sem conversão."""
+    result = runner.invoke(
+        app, ["converter", "-", str(tmp_path / "out"), "--json"], input=b"",
+    )
+
+    assert result.exit_code == 1
+    assert "Nenhum arquivo" in _sem_ansi(result.output)
+
+
+def test_cli_stdin_streaming_json_uma_linha_final_por_arquivo(tmp_path, capfd):
+    """`-` + --json: "processando" por arquivo e 1 linha final, ids = strings do stdin.
+
+    Lê com capfd: as linhas vão pelo fd original, não pelo sys.stdout do CliRunner.
+    """
+    entrada = tmp_path / "in"
+    entrada.mkdir()
+    a = entrada / "a.csv"
+    a.write_text("x,y\n1,2\n", encoding="utf-8")
+    b = entrada / "b.csv"
+    b.write_text("p,q\n3,4\n", encoding="utf-8")
+    caminhos = [str(a), str(b)]
+    stdin = ("\0".join(caminhos) + "\0").encode("utf-8")
+
+    result = runner.invoke(
+        app, ["converter", "-", str(tmp_path / "out"), "--json"], input=stdin,
+    )
+
+    assert result.exit_code == 0, result.output
+    linhas = [json.loads(linha) for linha in capfd.readouterr().out.splitlines() if linha.strip()]
+    processando = [item for item in linhas if item["status"] == "processando"]
+    finais = [item for item in linhas if item["status"] != "processando"]
+    assert len(processando) == 2
+    assert len(finais) == 2
+    assert {item["id"] for item in finais} == set(caminhos)
+    assert all(item["status"] == "concluido" for item in finais)
+    for caminho in caminhos:
+        sequencia = [item["status"] for item in linhas if item["id"] == caminho]
+        assert sequencia == ["processando", "concluido"]
+    assert (tmp_path / "out" / "a.md").exists()
+    assert (tmp_path / "out" / "b.md").exists()

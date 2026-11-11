@@ -12,10 +12,12 @@ import json
 import os
 import re
 import sys
+import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
@@ -35,6 +37,9 @@ from core.utils import (
     ModoImagem,
     validar_path_seguro,
 )
+
+if TYPE_CHECKING:
+    from core.batch import ResultadoArquivo
 
 app = typer.Typer(
     name="pdf2md",
@@ -65,17 +70,22 @@ _OPCOES_COM_VALOR = frozenset({
 # que não entende tags Rich (FIX 9).
 _RE_MARKUP_RICH = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9._ -]*?\]")
 
+# Serializa escritas JSON no fd original: os callbacks de progresso rodam em
+# threads do worker (ao_iniciar) e na thread principal (ao_concluir).
+_TRAVA_JSON = threading.Lock()
+
 
 def _indice_primeiro_posicional(argv: list[str]) -> int | None:
     """Índice do 1º argumento não-flag (pulando valores de opções).
 
     `pdf2md --workers 8 in.pdf out/` → pula "--workers" E "8" (valor da
     opção) até achar "in.pdf". Usado pelo default-command (FIX 5).
+    `-` sozinho é posicional (ORIGEM vinda do stdin), não flag.
     """
     i = 1
     while i < len(argv):
         arg = argv[i]
-        if arg.startswith("-"):
+        if arg.startswith("-") and arg != "-":
             if arg in _OPCOES_COM_VALOR:
                 i += 2  # flag + valor
             else:
@@ -110,7 +120,7 @@ def main() -> None:
     do `converter` injetado.
     """
     if len(sys.argv) > 1 and sys.argv[1] not in _COMANDOS_TOPO:
-        if sys.argv[1].startswith("-"):
+        if sys.argv[1].startswith("-") and sys.argv[1] != "-":
             pos = _indice_primeiro_posicional(sys.argv)
             if pos is not None and sys.argv[pos] not in _COMANDOS_TOPO:
                 # `pdf2md --sobrescrever in.pdf out/` → `converter --sobrescrever in.pdf out/`
@@ -131,14 +141,57 @@ def _emitir_json(
     status: str,
     erro: str | None,
     avisos: list[str] | None = None,
+    fd: int | None = None,
 ) -> None:
-    """Emite linha JSON no stdout para consumo pelo Swift bridge."""
+    """Emite linha JSON no stdout para consumo pelo Swift bridge.
+
+    Com `fd` (stdout original, salvo por `_silenciar_stdout_nativo`), escreve
+    direto no descritor sob trava — o fd 1 está redirecionado durante a
+    conversão, e threads de worker emitem concorrentemente.
+    """
     linha = json.dumps(
         {"id": id_, "status": status, "erro": erro, "avisos": avisos or []},
         ensure_ascii=False,
     )
-    sys.stdout.write(linha + "\n")
-    sys.stdout.flush()
+    if fd is None:
+        sys.stdout.write(linha + "\n")
+        sys.stdout.flush()
+        return
+    dados = (linha + "\n").encode("utf-8")
+    with _TRAVA_JSON:
+        while dados:
+            escritos = os.write(fd, dados)
+            dados = dados[escritos:]
+
+
+def _ler_lista_stdin() -> dict[Path, str]:
+    """Lê ORIGEM `-`: caminhos absolutos separados por NUL, em UTF-8.
+
+    Devolve {Path: string recebida} na ordem de entrada. A string original é
+    guardada porque o campo `id` do JSON deve ser exatamente o que chegou no
+    stdin (sem normalização do pathlib).
+    """
+    ids: dict[Path, str] = {}
+    for bruto in sys.stdin.buffer.read().split(b"\0"):
+        if not bruto:
+            continue
+        texto = os.fsdecode(bruto)
+        ids.setdefault(Path(texto), texto)
+    return ids
+
+
+def _callback_iniciar_json(fd: int, ids: Mapping[Path, str]) -> Callable[[Path], None]:
+    """Callback `ao_iniciar` do batch: emite a linha "processando" no fd original."""
+    return lambda p: _emitir_json(ids.get(p, str(p)), "processando", None, fd=fd)
+
+
+def _callback_concluir_json(
+    fd: int, ids: Mapping[Path, str],
+) -> Callable[["ResultadoArquivo"], None]:
+    """Callback `ao_concluir` do batch: emite a linha final de cada arquivo."""
+    return lambda r: _emitir_json(
+        ids.get(r.origem, str(r.origem)), r.status.value, r.erro, r.avisos, fd=fd,
+    )
 
 
 def _fmt_duracao(seg: float) -> str:
@@ -156,7 +209,7 @@ def _fmt_duracao(seg: float) -> str:
 
 
 @contextmanager
-def _silenciar_stdout_nativo() -> Iterator[None]:
+def _silenciar_stdout_nativo() -> Iterator[int]:
     """
     Redireciona o fd 1 (stdout) para o fd 2 (stderr) no nível do OS.
 
@@ -165,23 +218,29 @@ def _silenciar_stdout_nativo() -> Iterator[None]:
     Sem isto, o ruído ("Using Tesseract for OCR processing") contamina o
     protocolo JSON consumido pelo bridge Swift. Usado só ao redor da conversão;
     thread-safe na fronteira (as threads do batch são unidas antes de restaurar).
+
+    Yield: o descritor do stdout original (cópia de fd 1), por onde o JSON
+    em streaming ainda chega ao consumidor.
     """
     fd_salvo = os.dup(1)
     try:
         os.dup2(2, 1)
-        yield
+        yield fd_salvo
     finally:
         os.dup2(fd_salvo, 1)
         os.close(fd_salvo)
 
 
-def _requer_ocr(origem: Path) -> bool:
+def _requer_ocr(origem: Path | list[Path]) -> bool:
     """
     True se a entrada pode exigir OCR (imagens ou PDFs).
     Documentos Word (.doc/.docx) usam mammoth/textutil e dispensam Tesseract,
     então uma conversão só de Word não deve ser bloqueada por Tesseract ausente.
+    Lista (entrada `-`): basta um arquivo com extensão de OCR.
     """
     ocr_exts = EXTENSOES_IMAGEM | EXTENSOES_PDF
+    if isinstance(origem, list):
+        return any(p.is_file() and p.suffix.lower() in ocr_exts for p in origem)
     if origem.is_file():
         return origem.suffix.lower() in ocr_exts
     if origem.is_dir():
@@ -239,15 +298,30 @@ def converter(
     """
     Converte PDFs, imagens, Word, PPTX e planilhas em Markdown.
     --vault implica --obsidian automaticamente.
+
+    ORIGEM `-`: lista de arquivos no stdin, separados por NUL (protocolo da
+    GUI). Com --json, cada arquivo emite "processando" ao começar e uma linha
+    final ao concluir, em tempo real.
     """
     # Lazy imports: só carrega deps pesadas quando o comando é executado
     from core.batch import StatusArquivo, batch_convert
     from core.image_converter import verificar_tesseract
     from core.llm_enhancer import ConfigLLM
 
+    # ORIGEM `-` → lista vinda do stdin (ids preservam a string recebida)
+    entrada: Path | list[Path] = origem
+    ids: dict[Path, str] = {}
+    if str(origem) == "-":
+        ids = _ler_lista_stdin()
+        if not ids:
+            console.print("[red]Nenhum arquivo recebido pela entrada padrão (-).[/red]")
+            raise typer.Exit(code=1)
+        entrada = list(ids)
+
     # Validação de segurança
     try:
-        validar_path_seguro(origem)
+        for arq in entrada if isinstance(entrada, list) else [entrada]:
+            validar_path_seguro(arq)
         if vault:
             validar_path_seguro(vault)
         validar_path_seguro(destino)
@@ -257,7 +331,7 @@ def converter(
 
     # Verifica Tesseract apenas se a entrada puder exigir OCR.
     # (.docx/.doc usam mammoth/textutil e não dependem de Tesseract.)
-    if _requer_ocr(origem) and not verificar_tesseract():
+    if _requer_ocr(entrada) and not verificar_tesseract():
         msg = (
             "[red]Tesseract não encontrado. "
             "Instale: brew install tesseract tesseract-lang[/red]"
@@ -291,11 +365,11 @@ def converter(
             transient=True,
         ) as progress:
             task = progress.add_task("Convertendo...", total=None)
-            # Silencia o ruído nativo do MuPDF no stdout durante a conversão,
-            # preservando o stdout puro para o JSON emitido depois.
-            with _silenciar_stdout_nativo():
+            # Silencia o ruído nativo do MuPDF no stdout durante a conversão.
+            # O JSON em streaming vai pelo fd original (yield), não por sys.stdout.
+            with _silenciar_stdout_nativo() as fd_stdout:
                 resultados = batch_convert(
-                    origem=origem,
+                    origem=entrada,
                     destino=destino,
                     workers=workers,
                     sobrescrever=sobrescrever,
@@ -307,6 +381,8 @@ def converter(
                     llm_config=llm_config,
                     modo_imagem=imagens,
                     assets_dir=assets_dir,
+                    ao_iniciar=_callback_iniciar_json(fd_stdout, ids) if json_output else None,
+                    ao_concluir=_callback_concluir_json(fd_stdout, ids) if json_output else None,
                 )
             progress.update(task, total=len(resultados), completed=len(resultados))
     except (FileNotFoundError, NotADirectoryError) as exc:
@@ -314,76 +390,69 @@ def converter(
         raise typer.Exit(code=1) from exc
     tempo_total = time.perf_counter() - inicio
 
-    # Progresso / JSON
+    # JSON já foi emitido linha a linha pelos callbacks (ver batch_convert)
     if json_output:
-        for res in resultados:
-            _emitir_json(
-                str(res.origem),
-                res.status.value,
-                res.erro,
-                res.avisos,
-            )
-    else:
-        # Tabela de resultados
-        table = Table(title="Resultados da conversão")
-        table.add_column("Origem", style="cyan")
-        table.add_column("Status", style="green")
-        table.add_column("Destino", style="magenta")
-        table.add_column("Erro/Aviso", style="red")
+        return
+    # Tabela de resultados
+    table = Table(title="Resultados da conversão")
+    table.add_column("Origem", style="cyan")
+    table.add_column("Status", style="green")
+    table.add_column("Destino", style="magenta")
+    table.add_column("Erro/Aviso", style="red")
 
-        for res in resultados:
-            tem_avisos = bool(res.avisos)
-            if res.status == StatusArquivo.CONCLUIDO and tem_avisos:
-                status_color = "yellow"
-                status_label = "concluido⚠"  # ⚠ unicode
-            else:
-                status_color = {
-                    StatusArquivo.CONCLUIDO: "green",
-                    StatusArquivo.ERRO: "red",
-                    StatusArquivo.IGNORADO: "yellow",
-                    StatusArquivo.AGUARDANDO: "dim",
-                    StatusArquivo.PROCESSANDO: "blue",
-                }.get(res.status, "white")
-                status_label = res.status.value
+    for res in resultados:
+        tem_avisos = bool(res.avisos)
+        if res.status == StatusArquivo.CONCLUIDO and tem_avisos:
+            status_color = "yellow"
+            status_label = "concluido⚠"  # ⚠ unicode
+        else:
+            status_color = {
+                StatusArquivo.CONCLUIDO: "green",
+                StatusArquivo.ERRO: "red",
+                StatusArquivo.IGNORADO: "yellow",
+                StatusArquivo.AGUARDANDO: "dim",
+                StatusArquivo.PROCESSANDO: "blue",
+            }.get(res.status, "white")
+            status_label = res.status.value
 
-            nota = res.erro or (res.avisos[0] if res.avisos else "—")
+        nota = res.erro or (res.avisos[0] if res.avisos else "—")
 
-            table.add_row(
-                res.origem.name,
-                f"[{status_color}]{status_label}[/{status_color}]",
-                res.destino.name if res.destino else "—",
-                nota,
-            )
+        table.add_row(
+            res.origem.name,
+            f"[{status_color}]{status_label}[/{status_color}]",
+            res.destino.name if res.destino else "—",
+            nota,
+        )
 
-        console.print(table)
+    console.print(table)
 
-        total = len(resultados)
-        sucessos = sum(1 for r in resultados if r.status == StatusArquivo.CONCLUIDO and not r.avisos)
-        com_aviso = sum(1 for r in resultados if r.status == StatusArquivo.CONCLUIDO and r.avisos)
-        erros = sum(1 for r in resultados if r.status == StatusArquivo.ERRO)
-        ignorados = sum(1 for r in resultados if r.status == StatusArquivo.IGNORADO)
+    total = len(resultados)
+    sucessos = sum(1 for r in resultados if r.status == StatusArquivo.CONCLUIDO and not r.avisos)
+    com_aviso = sum(1 for r in resultados if r.status == StatusArquivo.CONCLUIDO and r.avisos)
+    erros = sum(1 for r in resultados if r.status == StatusArquivo.ERRO)
+    ignorados = sum(1 for r in resultados if r.status == StatusArquivo.IGNORADO)
 
-        partes = [
-            f"\n[bold]Total:[/bold] {total}",
-            f"[green]OK:[/green] {sucessos}",
-        ]
-        if com_aviso:
-            partes.append(f"[yellow]Com aviso:[/yellow] {com_aviso}")
-        partes += [
-            f"[red]Erros:[/red] {erros}",
-            f"[yellow]Ignorados:[/yellow] {ignorados}",
-            f"[blue]Tempo:[/blue] {_fmt_duracao(tempo_total)}",
-        ]
-        console.print(" | ".join(partes))
+    partes = [
+        f"\n[bold]Total:[/bold] {total}",
+        f"[green]OK:[/green] {sucessos}",
+    ]
+    if com_aviso:
+        partes.append(f"[yellow]Com aviso:[/yellow] {com_aviso}")
+    partes += [
+        f"[red]Erros:[/red] {erros}",
+        f"[yellow]Ignorados:[/yellow] {ignorados}",
+        f"[blue]Tempo:[/blue] {_fmt_duracao(tempo_total)}",
+    ]
+    console.print(" | ".join(partes))
 
-        # Lista avisos completos após a tabela
-        arquivos_com_aviso = [r for r in resultados if r.avisos]
-        if arquivos_com_aviso:
-            console.print("\n[yellow bold]⚠ Avisos de qualidade:[/yellow bold]")
-            for res in arquivos_com_aviso:
-                console.print(f"  [cyan]{res.origem.name}[/cyan]")
-                for aviso in res.avisos:
-                    console.print(f"    [yellow]• {aviso}[/yellow]")
+    # Lista avisos completos após a tabela
+    arquivos_com_aviso = [r for r in resultados if r.avisos]
+    if arquivos_com_aviso:
+        console.print("\n[yellow bold]⚠ Avisos de qualidade:[/yellow bold]")
+        for res in arquivos_com_aviso:
+            console.print(f"  [cyan]{res.origem.name}[/cyan]")
+            for aviso in res.avisos:
+                console.print(f"    [yellow]• {aviso}[/yellow]")
 
 
 # ── Subcomandos `llm modelos` / `llm testar` (diagnóstico + GUI) ─────────────

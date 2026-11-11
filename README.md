@@ -86,6 +86,9 @@ pdf2md spreadsheet.xlsx output/
 # Convert entire folder (parallel)
 pdf2md docs/ output/ --workers 8
 
+# List on stdin, NUL-separated (protocolo interno da GUI)
+printf '%s\0' a.pdf b.docx | pdf2md - output/
+
 # Overwrite existing .md files (default: skip with "ignored" status)
 pdf2md docs/ output/ --sobrescrever
 
