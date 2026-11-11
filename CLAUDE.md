@@ -3,7 +3,7 @@
 **Stack:** Python 3.12 + pymupdf4llm + Typer | SwiftUI (macOS 13+)
 **Test cmd:** `uv run pytest tests/ -v`
 **Lint cmd:** `uv run ruff check core/ tests/`
-**Build CLI:** `uv run pyinstaller core/cli.py --onefile --name pdf2md`
+**Build app:** `./scripts/build_app.sh` (PyInstaller + swiftc + codesign + DMG — o PyInstaller cru sem `--add-data` gera binário quebrado)
 
 ## Constraints
 

@@ -86,6 +86,10 @@ class ConfigLLM:
     key: str | None = None
 
 
+class RespostaTruncadaError(RuntimeError):
+    """O LLM parou no limite de max_tokens — o texto devolvido está incompleto."""
+
+
 class ModeloLLMInfo(TypedDict):
     """Item da lista de modelos — id do modelo + capacidade de visão."""
     id: str
@@ -202,7 +206,13 @@ def _completar(mensagens: list[dict[str, Any]], config: ConfigLLM | None = None)
     with urllib.request.urlopen(req, timeout=_timeout()) as resp:
         data = json.loads(resp.read().decode("utf-8"))
 
-    conteudo = data["choices"][0]["message"]["content"]
+    escolha = data["choices"][0]
+    # finish_reason "length" = resposta cortada em _MAX_TOKENS_RESPOSTA. Usar
+    # o texto parcial apagaria o fim do documento em silêncio — o chamador
+    # captura a exceção e mantém o original com aviso.
+    if escolha.get("finish_reason") == "length":
+        raise RespostaTruncadaError("resposta do LLM truncada em max_tokens")
+    conteudo = escolha["message"]["content"]
     if not isinstance(conteudo, str):
         # Não usa assert: some sob `python -O` e o contrato exige str.
         raise TypeError("resposta do LLM em formato inesperado")

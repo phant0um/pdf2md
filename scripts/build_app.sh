@@ -10,8 +10,8 @@
 #   5. hdiutil → PDF2MD-v<versão>.dmg
 #
 # Sem paths hardcoded: tudo derivado do local do script, do pyproject e do
-# ambiente Python ativo. Pré-requisito: `pip install ".[dev]"` no venv ativo
-# (pyinstaller + deps) e Command Line Tools (swiftc, hdiutil, codesign).
+# ambiente Python ativo. Pré-requisito: `uv sync --extra dev` (pyinstaller +
+# deps em .venv/) e Command Line Tools (swiftc, hdiutil, codesign).
 #
 # Uso: ./scripts/build_app.sh
 set -euo pipefail
@@ -26,9 +26,14 @@ BUILD="${RAIZ}/build"
 APP="${DIST}/PDF2MD.app"
 
 # ── Versão: fonte única é o pyproject.toml ──────────────────────────────────
-# Usa python do venv se VIRTUAL_ENV estiver setado, senão python3 do sistema
+# Ordem: venv ativo → .venv/ do projeto (uv sync) → python3 do sistema.
+# `${VIRTUAL_ENV:-}`: com `set -u`, a variável ausente abortava o script.
 PYTHON_BIN="python3"
-[[ -x "${VIRTUAL_ENV}/bin/python" ]] && PYTHON_BIN="${VIRTUAL_ENV}/bin/python"
+if [[ -x "${VIRTUAL_ENV:-}/bin/python" ]]; then
+    PYTHON_BIN="${VIRTUAL_ENV}/bin/python"
+elif [[ -x "${RAIZ}/.venv/bin/python" ]]; then
+    PYTHON_BIN="${RAIZ}/.venv/bin/python"
+fi
 VERSAO="$("${PYTHON_BIN}" -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
 # Número de build incremental e reproduzível (contagem de commits)
 BUILD_NUM="$(git rev-list --count HEAD 2>/dev/null || echo 1)"

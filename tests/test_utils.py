@@ -192,3 +192,10 @@ def test_sanitiza_path_outro_usuario_com_espaco_nao_vaza_username():
     assert "John" not in resultado
     assert "Doe" not in resultado
     assert resultado == "erro: [user]"
+
+
+def test_sanitizar_celula_md_quebras_cr_e_crlf_viram_espaco():
+    """CR e CRLF dentro da célula também partiriam a linha da tabela."""
+    from core.utils import _sanitizar_celula_md
+
+    assert _sanitizar_celula_md("a\r\nb\rc\nd") == "a b c d"
