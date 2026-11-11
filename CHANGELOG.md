@@ -20,6 +20,9 @@ Versioning follows [SemVer](https://semver.org/).
 
 ### Fixed
 
+- Linhas de CSV/XLSX com número de colunas diferente do cabeçalho geravam tabela
+  inválida (colunas extras sumiam) e linha em branco virava `|  |`; agora toda
+  linha tem a mesma largura e colunas vazias à direita saem.
 - `--workers 0` (ou negativo) derrubava o CLI com traceback do
   `ThreadPoolExecutor`; agora é erro de uso (`min=1`).
 - CSV com célula entre aspas contendo quebra de linha colava as palavras
