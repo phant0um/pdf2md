@@ -5,6 +5,14 @@ Versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- CI: push só em `main`, `pull_request` para qualquer base (PRs empilhados), e run
+  anterior do mesmo PR cancelado. Antes cada push em branch com PR rodava o workflow
+  duas vezes. Em PR, push novo cancela o run anterior do mesmo PR; em `main` cada
+  commit roda (grupo de concorrência por SHA). Flags do PyInstaller numa fonte única, `scripts/pyinstaller_cli.sh`,
+  usada pelo CI e pelo `build_app.sh`.
+
 ### Security
 
 - Pillow 12.3.0 → 13.0.0: 39 advisories (PYSEC-2026-4326 e seguintes) apontadas
@@ -21,9 +29,35 @@ Versioning follows [SemVer](https://semver.org/).
   rodava sempre que `PDF2MD_LLM_URL` estava definida, enviando imagens e páginas
   escaneadas para um provider remoto sem opt-in (privacidade e custo), e ignorava
   as flags. O alt-text de `--imagens ambos` nunca vai ao LLM.
+- `.gitignore` ignorava todo `*.xml` do repositório; agora só relatórios de teste (`coverage.xml`, `junit*.xml`).
+- `docs/progress.md` (parado no Ciclo 10) e os três relatórios de auditoria/revisão de agosto foram para `docs/historico/`, com nota de arquivamento; links do progress apontam para `phant0um/pdf2md`.
+- `--llm` melhorava só os primeiros 12 000 caracteres e colava o resto sem melhoria,
+  em silêncio. Agora o documento vai ao LLM em blocos cortados entre parágrafos (fora
+  de blocos de código), até 20 blocos (~240 mil caracteres), com aviso quando passa
+  disso ou quando um bloco falha; resposta vazia do LLM mantém o texto original.
+- `docs/adr/README.md`: índice dos ADRs; registra que a 0006 não foi usada.
 
 ### Fixed
 
+- A troca do home por `~` não respeitava o fim do segmento (home `/Users/al`
+  transformava `/Users/alice/x.pdf` em `~ice/x.pdf`); home `/` agora é ignorado.
+  `.`, `,` e `;` só fecham o segmento antes de espaço ou fim
+  (`/Users/john.doe` com home `/Users/john` vazava `.doe`), e a passada de contas
+  com espaço roda antes da troca do home.
+- Mensagens de erro com `/Users/<nome>` perdiam a palavra seguinte
+  (`"/Users/bob não encontrado"` virava `"[user] encontrado"`); agora só nomes
+  de contas locais com espaço são redigidos inteiros.
+- Linhas de CSV/XLSX com número de colunas diferente do cabeçalho geravam tabela
+  inválida (colunas extras sumiam) e linha em branco virava `|  |`; agora toda
+  linha tem a mesma largura e colunas vazias à direita saem.
+- GUI: o toggle "Melhorar com IA" ficava ligado (e desabilitado) quando a configuração do LLM deixava de ser válida, e a conversão mandava --llm-fallback com config incompleta; agora ele desliga e a chamada só passa a flag com config válida. Trocar só a chave nas Preferências (salvar ou apagar) também desliga o toggle.
+- `--imagens ambos` com `--obsidian` agora faz OCR das imagens embutidas: o
+  texto vai como alias do embed (`![[img.png|texto]]`). Antes o wikilink saía
+  sem alt e o OCR era pulado. Colchetes no texto do OCR não quebram mais o
+  link (viram espaço no alt).
+- `.docx` com `--imagens ambos` passa a exigir Tesseract, como PDF. Antes a
+  conversão rodava sem Tesseract e gravava "imagem" como alt-text em todas as
+  imagens, sem aviso.
 - `--workers 0` (ou negativo) derrubava o CLI com traceback do
   `ThreadPoolExecutor`; agora é erro de uso (`min=1`).
 - CSV com célula entre aspas contendo quebra de linha colava as palavras
@@ -39,6 +73,13 @@ Versioning follows [SemVer](https://semver.org/).
   presa na estática.
 - `scripts/build_app.sh` abortava sem venv ativo (`VIRTUAL_ENV: unbound
   variable`); agora cai no `.venv/` do `uv sync`.
+- `scripts/build_app.sh`: só com Command Line Tools, o SDK padrão (MacOSX27.2) não
+  compila SwiftUI (plugin `SwiftUIMacros` ausente) e o build falhava no passo 2,
+  depois do PyInstaller. Uma sonda escolhe o SDK (`PDF2MD_SDK`, padrão, versionados)
+  e falha cedo.
+- PPTX com caixa de texto comum (Inserir > Caixa de Texto) falhava inteiro com
+  `ValueError: shape is not a placeholder`. Texto dentro de grupos e notas do
+  orador agora entram no Markdown.
 
 ## [0.6.1] — 2026-11-07
 

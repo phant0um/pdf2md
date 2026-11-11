@@ -158,7 +158,6 @@ class BatchProcessor: ObservableObject {
                 if let key = llmKey { envLLM["PDF2MD_LLM_KEY"] = key }
             }
 
-            // Watchdog escala com o lote: 30 min por arquivo, no mínimo 30 min.
             let base = vault ?? destino
 
             // Cancelamento é responsabilidade do ProcessRunner: SIGTERM +
@@ -169,21 +168,27 @@ class BatchProcessor: ObservableObject {
                 args: args,
                 env: envLLM.isEmpty ? nil : envLLM,
                 entrada: entrada,
+                // Watchdog escala com o lote: 30 min por arquivo, no mínimo 30 min.
                 timeout: 30 * 60 * Double(max(1, arquivosValidos.count)),
                 aoLinhaStdout: { linha in
                     // Chamado em background: só decodifica e pula para o MainActor.
-                    guard let jsonData = linha.data(using: .utf8),
-                          let item = try? JSONDecoder().decode(ProgressoArquivo.self, from: jsonData)
-                    else { return }
+                    guard let item = Self.decodificarEvento(linha) else { return }
                     Task { @MainActor in
                         self.aplicarEvento(item, base: base)
                     }
                 }
             )
 
-            // Dá uma volta ao MainActor para aplicar os eventos já enfileirados
-            // antes de fechar o que sobrou.
-            await Task.yield()
+            // Reaplica todo o stdout, em ordem, antes de fechar o que sobrou.
+            // O stdout completo é a fonte final: tasks atrasadas do callback
+            // não têm ordem garantida. aplicarEvento é idempotente (final
+            // repetido é igual; "processando" atrasado cai no guard), então
+            // reaplicar não regride estado.
+            for linha in String(decoding: resultado.stdout ?? Data(), as: UTF8.self).split(separator: "\n") {
+                if let item = Self.decodificarEvento(String(linha)) {
+                    aplicarEvento(item, base: base)
+                }
+            }
 
             // Finaliza os ids sem evento final (cancelado, falha do processo
             // ou CLI que não emitiu o resultado do arquivo).
@@ -218,6 +223,12 @@ class BatchProcessor: ObservableObject {
         if let index = progresso.firstIndex(where: { $0.id == id }) {
             progresso[index] = ProgressoArquivo(id: id, status: status, erro: erro, avisos: avisos)
         }
+    }
+
+    /// Decodifica uma linha JSON do stdout do CLI. Linha inválida vira nil.
+    nonisolated private static func decodificarEvento(_ linha: String) -> ProgressoArquivo? {
+        guard let jsonData = linha.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(ProgressoArquivo.self, from: jsonData)
     }
 
     /// Aplica um evento de progresso emitido pelo CLI (uma linha JSON por evento).
@@ -259,9 +270,10 @@ class BatchProcessor: ObservableObject {
     }
 
     /// FIX 6: reconversão de arquivo existente chega como "ignorado" sem
-    /// motivo (a GUI nunca passa --sobrescrever). A GUI chama o binário por
-    /// arquivo, então o destino esperado é sempre `<base>/<stem>.md` — sem o
-    /// dedup de nomes do batch. Se o .md já existe, anexa aviso explicativo.
+    /// motivo (a GUI nunca passa --sobrescrever). A GUI chama o binário uma
+    /// vez por lote (ids no stdin), não por arquivo. O destino esperado é
+    /// `<base>/<stem>.md`; a checagem não reproduz o dedup de nomes do lote.
+    /// Se o .md já existe, anexa aviso explicativo.
     private func anexarMotivoIgnorado(_ item: ProgressoArquivo, base: URL?) -> ProgressoArquivo {
         guard let base else { return item }
         let origem = URL(fileURLWithPath: item.id)

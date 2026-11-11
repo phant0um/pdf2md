@@ -18,6 +18,8 @@ import Security
 enum KeychainHelper {
     static let servico = "com.pdf2md.llm"
     static let conta = "api-key"
+    /// Postada quando a key muda (salvar/apagar), para views reavaliarem o cache.
+    static let mudou = Notification.Name("pdf2md.keychain.mudou")
 
     // Cache em memória: `.none` = ainda não lido; `.some(nil)` = lido, sem key.
     nonisolated(unsafe) private static var cache: String??  // protegido por `trava`
@@ -45,6 +47,7 @@ enum KeychainHelper {
         ]
         let ok = SecItemAdd(attrs as CFDictionary, nil) == errSecSuccess
         trava.lock(); cache = .some(ok ? valor : nil); trava.unlock()
+        if ok { NotificationCenter.default.post(name: mudou, object: nil) }
         return ok
     }
 
@@ -81,5 +84,6 @@ enum KeychainHelper {
         ]
         SecItemDelete(query as CFDictionary)
         trava.lock(); cache = .some(nil); trava.unlock()
+        NotificationCenter.default.post(name: mudou, object: nil)
     }
 }

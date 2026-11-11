@@ -32,6 +32,17 @@ _RE_PATH_ABSOLUTO = re.compile(
     r"(~)?(?:/(?:[^/\x00-\x1f:'\\\") ]| (?=[^/\x00-\x1f:'\\\") ]*/))+)+"
 )
 
+# Diretório de contas locais do macOS. Monkeypatchado nos testes.
+_DIR_USUARIOS = Path("/Users")
+
+# Lookahead de fim de segmento de path: o match só vale se o próximo caractere
+# fecha o segmento (barra, espaço, aspas, dois-pontos, parêntese ou fim de string).
+# Impede que "/Users/al" case o prefixo de "/Users/alice".
+# Pontuação ("." "," ";") só fecha o segmento quando seguida de espaço ou fim de
+# string (fim de frase): dentro de nome de conta ("john.doe", "john,bob") não fecha,
+# senão o sufixo vazaria.
+_FIM_SEGMENTO = r"(?=/|[\s:'\")]|[.,;](?:\s|$)|$)"
+
 # Extensões suportadas — fonte única da verdade (converters importam daqui)
 EXTENSOES_PDF: frozenset[str] = frozenset({".pdf"})
 EXTENSOES_IMAGEM: frozenset[str] = frozenset({
@@ -131,6 +142,19 @@ def validar_path_seguro(path: Path, base_permitida: Path | None = None) -> Path:
     return path_resolvido
 
 
+def _usuarios_com_espaco() -> list[str]:
+    """
+    Nomes de contas locais com espaço em `_DIR_USUARIOS` (ex: "John Doe"),
+    do mais longo para o mais curto. Diretório ausente ou sem permissão
+    devolve lista vazia.
+    """
+    try:
+        nomes = [p.name for p in _DIR_USUARIOS.iterdir() if " " in p.name]
+    except OSError:
+        return []
+    return sorted(nomes, key=len, reverse=True)
+
+
 def sanitizar_mensagem_erro(msg: str) -> str:
     """
     Redige qualquer caminho absoluto presente em uma mensagem de erro,
@@ -152,7 +176,10 @@ def sanitizar_mensagem_erro(msg: str) -> str:
     Paths absolutos de OUTRO usuário (ex: "/Users/bob/..." quando o
     home do usuário atual é "/Users/alice") são redigidos ao basename
     do arquivo, sem revelar o username de terceiro (CWE-209 — útil em
-    volumes compartilhados).
+    volumes compartilhados). Nomes com espaço ("/Users/John Doe") são
+    redigidos inteiros só se existirem em `/Users` (contas locais); um
+    nome com espaço que não é conta local deixa a segunda palavra visível,
+    o que não pode vir de erro de filesystem local.
 
     Args:
         msg: Mensagem de erro potencialmente contendo paths absolutos.
@@ -162,8 +189,22 @@ def sanitizar_mensagem_erro(msg: str) -> str:
         "~/..." quando o path está dentro do home do usuário).
     """
     home = str(Path.home())
-    if home and home in msg:
-        msg = msg.replace(home, "~")
+
+    # Contas locais com espaço no nome: "/Users/John Doe" vira "/Users/[user]"
+    # antes da troca do home e da regex, para o espaço não ser lido como fim de
+    # path. Roda ANTES do home: com home "/Users/John", trocar o home primeiro
+    # deixaria " Doe" visível. A conta que é o próprio home é pulada (ela vira "~").
+    if "/Users/" in msg:
+        for nome in _usuarios_com_espaco():
+            if "/Users/" + nome == home:
+                continue
+            padrao = re.escape("/Users/" + nome) + _FIM_SEGMENTO
+            msg = re.sub(padrao, "/Users/[user]", msg)
+
+    # O match para no fim do segmento (home "/Users/al" não toca "/Users/alice").
+    # Home "/" é ignorado: trocaria toda barra do path por "~".
+    if home and home != "/" and home in msg:
+        msg = re.sub(re.escape(home) + _FIM_SEGMENTO, "~", msg)
 
     def _substituir(m: re.Match[str]) -> str:
         full = m.group(0)
@@ -175,8 +216,8 @@ def sanitizar_mensagem_erro(msg: str) -> str:
         # Caso especial: "/Users/<username>" (exatamente 2 segmentos no
         # padrão macOS) — o basename IS o username, que seria vazado.
         # Redige para "[user]" em vez de expor o nome (CWE-209).
-        # Username com espaço ("/Users/John Doe"): a regex casa só
-        # "/Users/John"; o " Doe" restante é tratado na segunda passada.
+        # Username com espaço já foi trocado por "/Users/[user]" antes da
+        # regex (ver _usuarios_com_espaco), então cai neste caso também.
         if full.startswith("/Users/") and full.count("/") == 2:
             return "[user]"
         # PurePosixPath.name extrai o último segmento mesmo quando os
@@ -186,9 +227,4 @@ def sanitizar_mensagem_erro(msg: str) -> str:
         # ocorrer dado que a regex exige ao menos um "/<algo>").
         return PurePosixPath(full).name or full
 
-    # Primeiro passa: redige paths normais
-    msg = _RE_PATH_ABSOLUTO.sub(_substituir, msg)
-    # Segunda passada: redige "[user] <palavra>" onde "<palavra>" é o
-    # restante de um username com espaço que a regex não capturou.
-    msg = re.sub(r"\[user\] \S+", "[user]", msg)
-    return msg
+    return _RE_PATH_ABSOLUTO.sub(_substituir, msg)

@@ -1,9 +1,11 @@
 # pdf2md — Progress
 
+> Arquivado em 2026-11-10. Histórico dos Ciclos 1 a 10 (até junho de 2026); mudanças posteriores estão no [CHANGELOG](../../CHANGELOG.md).
+
 ## Ciclo 1 (Fase 0-1 + Gate 1) — CONCLUÍDO ✅
 - Status: Fechado — 2026-05-22
 - Commit: `feat: implementação inicial pdf2md v0.1.0-alpha`
-- Repo: https://github.com/mchlcs/pdf2md
+- Repo: https://github.com/phant0um/pdf2md
 
 ### Gate 1 — Forge Score
 - Score 5E: **91/100** ✅ (threshold: 75)
@@ -19,7 +21,7 @@
 
 ## Ciclo 2 (Fase 4 + Release) — CONCLUÍDO ✅
 - Status: Fechado — 2026-05-29
-- Release: https://github.com/mchlcs/pdf2md/releases/tag/v0.1.0
+- Release: https://github.com/phant0um/pdf2md/releases/tag/v0.1.0
 
 ### Fase 4 — Empacotamento (Bastion)
 - Deps instaladas: pymupdf4llm, pytesseract, Pillow, pillow-heif, PyYAML, typer, rich, pyinstaller, create-dmg, tesseract
@@ -49,7 +51,7 @@ subprocess via Process() com validação de paths no Swift bridge.
 
 ## Ciclo 3 (Code Review + Release v0.2.0) — CONCLUÍDO ✅
 - Status: Fechado — 2026-05-29
-- Release: https://github.com/mchlcs/pdf2md/releases/tag/v0.2.0 (**Latest**)
+- Release: https://github.com/phant0um/pdf2md/releases/tag/v0.2.0 (**Latest**)
 - v0.1.0 rebaixado a **pre-release** (bug do Tesseract + desatualizado)
 
 ### Code Review (max-effort — 5 finders + verify + sweep)
@@ -87,7 +89,7 @@ subprocess via Process() com validação de paths no Swift bridge.
 
 ## Ciclo 4 (Release v0.3.0) — CONCLUÍDO ✅
 - Status: Fechado — 2026-05-29
-- Release: https://github.com/mchlcs/pdf2md/releases/tag/v0.3.0 (**Latest**)
+- Release: https://github.com/phant0um/pdf2md/releases/tag/v0.3.0 (**Latest**)
 - Gatilho: usuário reportou erro "antiword não encontrado" ao converter `.doc`
 
 ### Correções
@@ -119,7 +121,7 @@ resolvers espelhados; replicar o padrão para novas deps externas.
 
 ## Ciclo 5 (Patch v0.3.1 + Hill-climbing) — CONCLUÍDO ✅
 - Status: Fechado — 2026-05-29
-- Release: https://github.com/mchlcs/pdf2md/releases/tag/v0.3.1 (**Latest**)
+- Release: https://github.com/phant0um/pdf2md/releases/tag/v0.3.1 (**Latest**)
 - Gatilho: usuário reportou tempo por-arquivo sempre "0.0s"
 
 ### Correção
@@ -145,7 +147,7 @@ resolvers espelhados; replicar o padrão para novas deps externas.
 
 ## Ciclo 6 (v0.4.0 — Novos formatos + qualidade + LLM) — CONCLUÍDO ✅
 - Status: Fechado — 2026-05-30
-- Release: https://github.com/mchlcs/pdf2md/releases/tag/v0.4.0 (**Latest**)
+- Release: https://github.com/phant0um/pdf2md/releases/tag/v0.4.0 (**Latest**)
 - PRs: #10 (browse/paste/13 fixes), #11 (PPTX/XLSX/CSV/qualidade/LLM)
 
 ### Novos formatos
