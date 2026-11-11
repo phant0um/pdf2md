@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import IO, Protocol
 
 from core.image_assets import (
+    AssetImagem,
     ColetorAssets,
     ContextoAssets,
     preparar_assets_dir,
@@ -192,6 +193,18 @@ def _descartar_imagem(image: _ImagemMammoth) -> dict[str, str]:
 _MARCADOR_WIKILINK = "pdf2md-asset://"
 
 
+def _alt_ocr(asset: AssetImagem) -> str:
+    """Alt-text do OCR seguro para `![alt](src)` e `![[nome|alt]]`.
+
+    `[`, `]` e `\\` viram espaço: um `]` no texto do OCR fechava o alt cedo
+    e o marcador `pdf2md-asset://` vazava para o Markdown final.
+    """
+    bruto = alt_text_enxuto(ocr_bytes(asset.dados, asset.extensao))
+    limpo = re.sub(r"[\[\]\\]", " ", bruto)
+    limpo = re.sub(r"\s+", " ", limpo).strip()
+    return limpo or "imagem"
+
+
 def _montar_handler(contexto: ContextoAssets) -> Callable[[_ImagemMammoth], dict[str, str]]:
     """Closure do mammoth: recebe a imagem do documento e devolve atributos <img>.
 
@@ -244,15 +257,15 @@ def _montar_handler(contexto: ContextoAssets) -> Callable[[_ImagemMammoth], dict
         if asset is None:
             return {}
 
-        ocr = contexto.modo == ModoImagem.ambos and not asset.duplicado
+        fazer_ocr = contexto.modo == ModoImagem.ambos and not asset.duplicado
         if contexto.wikilinks:
             marcador = {"src": f"{_MARCADOR_WIKILINK}{asset.nome}"}
-            if ocr:
-                marcador["alt"] = alt_text_enxuto(ocr_bytes(asset.dados, asset.extensao))
+            if fazer_ocr:
+                marcador["alt"] = _alt_ocr(asset)
             return marcador
         src = {"src": os.path.relpath(asset.caminho_disco, contexto.md_dir)}
-        if ocr:
-            src["alt"] = alt_text_enxuto(ocr_bytes(asset.dados, asset.extensao))
+        if fazer_ocr:
+            src["alt"] = _alt_ocr(asset)
         return src
 
     return converter_imagem

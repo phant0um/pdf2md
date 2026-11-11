@@ -335,7 +335,8 @@ def converter(
         raise typer.Exit(code=1) from exc
 
     # Verifica Tesseract apenas se a entrada puder exigir OCR.
-    # (.docx/.doc usam mammoth/textutil e não dependem de Tesseract.)
+    # (.doc usa textutil e .docx usa mammoth; nenhum dos dois exige Tesseract,
+    # exceto .docx com `--imagens ambos`, que faz OCR de cada imagem.)
     if _requer_ocr(entrada, imagens) and not verificar_tesseract():
         msg = (
             "[red]Tesseract não encontrado. "

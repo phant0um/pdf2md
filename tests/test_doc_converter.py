@@ -254,6 +254,37 @@ def test_docx_ambos_wikilinks_ocr_vira_alias(tmp_path):
     assert "![[img_0001.png|TEXTO DA IMAGEM]]" in md
 
 
+def test_docx_ambos_wikilinks_ocr_com_colchete_nao_vaza(tmp_path):
+    """ambos + Obsidian: `]` no OCR não fecha o alt nem vaza o marcador interno."""
+    from unittest.mock import patch
+
+    path = tmp_path / "com_imagem.docx"
+    _criar_docx_com_imagem(path)
+
+    with patch("core.doc_converter.ocr_bytes", return_value="a]b"):
+        md = doc_to_md(
+            path, modo_imagem=ModoImagem.ambos, wikilinks=True,
+            assets_dir=tmp_path / "anexos", md_dir=tmp_path,
+        )
+
+    assert "![[img_0001.png|a b]]" in md
+    assert "pdf2md-asset://" not in md
+
+
+def test_docx_ambos_link_ocr_com_colchete_vira_link_valido(tmp_path):
+    """ambos sem wikilink: `[x] y` no OCR vira alt `x y`, link Markdown válido."""
+    from unittest.mock import patch
+
+    path = tmp_path / "com_imagem.docx"
+    _criar_docx_com_imagem(path)
+
+    with patch("core.doc_converter.ocr_bytes", return_value="[x] y"):
+        md = doc_to_md(path, modo_imagem=ModoImagem.ambos)
+
+    assert "![x y](com_imagem_assets/img_0001.png)" in md
+    assert "pdf2md-asset://" not in md
+
+
 def test_docx_extrair_wikilinks_pula_ocr(tmp_path):
     """extrair + Obsidian: wikilink puro e sem OCR, mesmo com alt próprio no docx."""
     from unittest.mock import patch
