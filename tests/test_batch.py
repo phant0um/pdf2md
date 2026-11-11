@@ -494,18 +494,48 @@ def test_batch_pdf_corrompido_erro_sanitizado_sem_interromper(tmp_path):
 
 
 def test_processar_arquivo_excecao_vira_erro_sanitizado(tmp_path):
-    """Worker direto: exceção real → dict de ERRO, sem propagar."""
+    """Worker direto: exceção real → ResultadoArquivo de ERRO, sem propagar."""
     from core.batch import _processar_arquivo
 
     origem = tmp_path / "quebrado.pdf"
     origem.write_bytes(b"%PDF-1.4\n% lixo")
 
-    resultado = _processar_arquivo(str(origem), str(tmp_path / "saida" / "quebrado.md"), False, False)
+    resultado = _processar_arquivo(origem, tmp_path / "saida" / "quebrado.md", False, False)
 
-    assert resultado["status"] == "erro"
-    assert resultado["destino"] is None
-    assert resultado["erro"] is not None
-    assert str(tmp_path) not in resultado["erro"]  # sanitizado
+    assert resultado.status is StatusArquivo.ERRO
+    assert resultado.destino is None
+    assert resultado.erro is not None
+    assert str(tmp_path) not in resultado.erro  # sanitizado
+
+
+def test_processar_arquivo_devolve_resultado_arquivo(tmp_path):
+    """Worker direto com CSV válido → ResultadoArquivo CONCLUIDO com origem/destino Path."""
+    from core.batch import _processar_arquivo
+
+    origem = _csv(tmp_path / "ok.csv")
+    dest = tmp_path / "saida" / "ok.md"
+
+    resultado = _processar_arquivo(origem, dest, False, False)
+
+    assert isinstance(resultado, ResultadoArquivo)
+    assert resultado.status is StatusArquivo.CONCLUIDO
+    assert resultado.origem == origem
+    assert resultado.destino == dest
+
+
+def test_processar_arquivo_destino_existe_ignorado(tmp_path):
+    """Destino já existe com sobrescrever=False → IGNORADO, sem reconverter."""
+    from core.batch import _processar_arquivo
+
+    origem = _csv(tmp_path / "ok.csv")
+    dest = tmp_path / "saida" / "ok.md"
+    dest.parent.mkdir(parents=True)
+    dest.write_text("existente", encoding="utf-8")
+
+    resultado = _processar_arquivo(origem, dest, False, False)
+
+    assert resultado.status is StatusArquivo.IGNORADO
+    assert resultado.destino == dest
 
 
 def test_batch_colisao_stem_tres_arquivos(tmp_path):
@@ -750,11 +780,11 @@ def test_processar_imagem_llm_fallback_passa_config(tmp_path, monkeypatch):
     visoes = _espiar_image_to_md(monkeypatch)
 
     res = _processar_arquivo(
-        str(_png_branco(tmp_path)), str(tmp_path / "saida.md"), False, True,
+        _png_branco(tmp_path), tmp_path / "saida.md", False, True,
         llm_fallback=True,
     )
 
-    assert res["status"] == StatusArquivo.CONCLUIDO.value
+    assert res.status is StatusArquivo.CONCLUIDO
     assert len(visoes) == 1
     assert isinstance(visoes[0], ConfigLLM)
 
@@ -764,10 +794,10 @@ def test_processar_imagem_sem_flags_visao_none(tmp_path, monkeypatch):
     visoes = _espiar_image_to_md(monkeypatch)
 
     res = _processar_arquivo(
-        str(_png_branco(tmp_path)), str(tmp_path / "saida.md"), False, True,
+        _png_branco(tmp_path), tmp_path / "saida.md", False, True,
     )
 
-    assert res["status"] == StatusArquivo.CONCLUIDO.value
+    assert res.status is StatusArquivo.CONCLUIDO
     assert visoes == [None]
 
 
@@ -780,12 +810,12 @@ def test_processar_imagem_config_sem_flags_visao_none(tmp_path, monkeypatch):
     visoes = _espiar_image_to_md(monkeypatch)
 
     res = _processar_arquivo(
-        str(_png_branco(tmp_path)), str(tmp_path / "saida.md"), False, True,
+        _png_branco(tmp_path), tmp_path / "saida.md", False, True,
         usar_llm=False, llm_fallback=False,
         llm_config=ConfigLLM(url="http://x/v1", modelo="m"),
     )
 
-    assert res["status"] == StatusArquivo.CONCLUIDO.value
+    assert res.status is StatusArquivo.CONCLUIDO
     assert visoes == [None]
 
 
@@ -795,9 +825,9 @@ def test_processar_imagem_llm_config_mesmo_objeto(tmp_path, monkeypatch):
     cfg = ConfigLLM(url="http://x:1/v1", modelo="m")
 
     res = _processar_arquivo(
-        str(_png_branco(tmp_path)), str(tmp_path / "saida.md"), False, True,
+        _png_branco(tmp_path), tmp_path / "saida.md", False, True,
         usar_llm=True, llm_config=cfg,
     )
 
-    assert res["status"] == StatusArquivo.CONCLUIDO.value
+    assert res.status is StatusArquivo.CONCLUIDO
     assert visoes[0] is cfg

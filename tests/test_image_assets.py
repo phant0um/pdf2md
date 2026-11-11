@@ -42,7 +42,7 @@ def test_resolver_assets_prefixo_saneado_assets_dir():
 
     origem = Path("/tmp/Relatório Final.pdf")
     destino = Path("/tmp/saida/Relatório Final.md")
-    assets, prefixo = _resolver_assets(origem, destino, obsidian=False, assets_dir_str="/tmp/assets")
+    assets, prefixo = _resolver_assets(origem, destino, obsidian=False, assets_dir=Path("/tmp/assets"))
     assert prefixo == "Relatorio_Final__"
 
 
@@ -52,7 +52,7 @@ def test_resolver_assets_prefixo_saneado_obsidian():
 
     origem = Path("/tmp/Plano de Ação.pdf")
     destino = Path("/tmp/vault/Plano de Ação.md")
-    assets, prefixo = _resolver_assets(origem, destino, obsidian=True, assets_dir_str=None)
+    assets, prefixo = _resolver_assets(origem, destino, obsidian=True, assets_dir=None)
     assert prefixo == "Plano_de_Acao__"
     assert str(assets).endswith("attachments")
 
@@ -63,7 +63,7 @@ def test_resolver_assets_default_sem_prefixo():
 
     origem = Path("/tmp/Relatório Final.pdf")
     destino = Path("/tmp/saida/Relatório Final.md")
-    assets, prefixo = _resolver_assets(origem, destino, obsidian=False, assets_dir_str=None)
+    assets, prefixo = _resolver_assets(origem, destino, obsidian=False, assets_dir=None)
     assert prefixo == ""
     assert assets.name == "Relatório Final_assets"
 
