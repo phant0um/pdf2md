@@ -810,12 +810,12 @@ def test_processar_imagem_config_sem_flags_visao_none(tmp_path, monkeypatch):
     visoes = _espiar_image_to_md(monkeypatch)
 
     res = _processar_arquivo(
-        str(_png_branco(tmp_path)), str(tmp_path / "saida.md"), False, True,
+        _png_branco(tmp_path), tmp_path / "saida.md", False, True,
         usar_llm=False, llm_fallback=False,
         llm_config=ConfigLLM(url="http://x/v1", modelo="m"),
     )
 
-    assert res["status"] == StatusArquivo.CONCLUIDO.value
+    assert res.status is StatusArquivo.CONCLUIDO
     assert visoes == [None]
 
 
