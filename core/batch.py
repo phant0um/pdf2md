@@ -103,11 +103,14 @@ def _processar_arquivo(
     if not sobrescrever and destino.exists():
         return _resultado_ignorado(origem_str, destino_str)
 
+    # LLM com visão só com opt-in explícito (--llm / --llm-fallback); sem ele, None.
+    visao = (llm_config or ConfigLLM()) if (usar_llm or llm_fallback) else None
+
     try:
         avisos_imagens: list[str] = []
         md = _converter_arquivo(
             origem, ignorar_margens, modo_imagem, destino,
-            obsidian, assets_dir_str, avisos_imagens,
+            obsidian, assets_dir_str, avisos_imagens, visao,
         )
         if md is None:
             return _resultado_ignorado(origem_str, None)
@@ -141,12 +144,15 @@ def _converter_arquivo(
     obsidian: bool = False,
     assets_dir_str: str | None = None,
     avisos: list[str] | None = None,
+    visao: ConfigLLM | None = None,
 ) -> str | None:
     """
     Despacha para o conversor correto baseado na extensão. None = não suportado.
 
-    `--imagens` é PDF-only: só pdf_to_md recebe o modo (padrão de
-    `ignorar_margens`); outros formatos ganham um aviso, não erro.
+    `--imagens` vale para PDF e DOCX: só pdf_to_md/doc_to_md recebem o
+    modo; outros formatos ganham um aviso, não erro.
+
+    `visao` (opt-in do LLM com visão) vai só para pdf_to_md e image_to_md.
     """
     sufixo = origem.suffix.lower()
     conversor = next(
@@ -157,7 +163,7 @@ def _converter_arquivo(
     if conversor is pdf_to_md:
         return _pdf_to_md(
             origem, ignorar_margens, modo_imagem,
-            destino, obsidian, assets_dir_str, avisos,
+            destino, obsidian, assets_dir_str, avisos, visao,
         )
     if conversor is doc_to_md:
         return _docx_to_md(
@@ -165,6 +171,8 @@ def _converter_arquivo(
         )
     if modo_imagem != ModoImagem.transcrever and avisos is not None:
         avisos.append("--imagens só se aplica a PDF e DOCX — modo ignorado para este arquivo")
+    if conversor is image_to_md:
+        return image_to_md(origem, visao=visao)
     return conversor(origem)
 
 
@@ -232,13 +240,15 @@ def _pdf_to_md(
     obsidian: bool,
     assets_dir_str: str | None,
     avisos: list[str] | None,
+    visao: ConfigLLM | None = None,
 ) -> str:
     """Chama pdf_to_md com os assets resolvidos (default byte-idêntico)."""
     if modo_imagem == ModoImagem.transcrever:
-        return pdf_to_md(origem, ignorar_margens=ignorar_margens)
+        return pdf_to_md(origem, ignorar_margens=ignorar_margens, visao=visao)
     return pdf_to_md(
         origem,
         ignorar_margens=ignorar_margens,
+        visao=visao,
         **_kwargs_assets(origem, modo_imagem, destino, obsidian, assets_dir_str, avisos),
     )
 
@@ -302,7 +312,7 @@ def batch_convert(
 
     Comportamento:
     - Se `origem` é arquivo único: processa só ele
-    - Se `origem` é diretório: varre recursivamente (não recursivo por padrão — só nível raiz)
+    - Se `origem` é diretório: processa só o nível raiz (não recursivo)
     - Arquivos com extensão não suportada: StatusArquivo.IGNORADO (sem erro)
     - `sobrescrever=False`: pula arquivos já existentes no destino
     - `vault` definido: output vai direto para `vault/` (cria se não existir)
@@ -313,7 +323,7 @@ def batch_convert(
     Args:
         origem: Arquivo ou diretório de entrada.
         destino: Diretório de saída (criado se não existir). Ignorado se vault definido.
-        workers: Número de processos paralelos.
+        workers: Número de threads paralelas.
         sobrescrever: Se True, sobrescreve MDs existentes.
         vault: Path para raiz do Obsidian vault. Output vai direto para vault/.
         obsidian: Se True, adiciona frontmatter Obsidian ao MD gerado.
