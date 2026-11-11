@@ -43,6 +43,7 @@ Exemplos de configuração:
 """
 
 import base64
+import bisect
 import json
 import os
 import time
@@ -61,7 +62,8 @@ from core.utils import _MAX_BYTES_IMAGEM
 _URL_PADRAO = "http://localhost:11434/v1"
 _MODELO_PADRAO = "llama3.2-vision"
 _TIMEOUT_PADRAO = 120
-_MAX_CHARS_LLM = 12000       # ~3k tokens — evita estourar contexto do modelo
+_MAX_CHARS_LLM = 12000       # ~3k tokens por bloco — cabe no contexto do modelo
+_MAX_BLOCOS_LLM = 20         # ~240k chars; limita chamadas/custo em documentos enormes
 _MAX_TOKENS_RESPOSTA = 4096
 _TIMEOUT_VERIFICACAO = 2     # segundos — timeout rápido para checagem de disponibilidade
 _TIMEOUT_MODELOS = 10        # segundos — timeout para listagem de modelos
@@ -385,6 +387,13 @@ def melhorar_markdown(
     Útil quando o conversor produziu texto com palavras quebradas, acentos
     corrompidos ou formatação perdida.
 
+    Documentos acima de `_MAX_CHARS_LLM` vão ao LLM em blocos cortados entre
+    parágrafos (fora de blocos de código), no máximo `_MAX_BLOCOS_LLM` blocos;
+    o resto fica sem melhoria, com aviso. Se um bloco falha, ele mantém o texto
+    original e os demais continuam melhorados. Se todos os blocos enviados
+    falham, devolve o `md` original. As quebras de linha originais nas bordas de
+    cada bloco são preservadas (não se insere linha em branco num corte simples).
+
     Falha graciosamente: se o LLM não estiver disponível ou retornar erro,
     retorna o markdown original com um aviso — nunca bloqueia a conversão.
 
@@ -396,19 +405,100 @@ def melhorar_markdown(
     Returns:
         (md_melhorado, avisos_adicionais) — avisos_adicionais é [] se OK.
     """
-    # Trunca para não estourar o contexto (12k chars ≈ ~3k tokens)
-    md_input = md[:_MAX_CHARS_LLM]
-    prompt = _PROMPT_MELHORIA.format(nome=origem.name, md=md_input)
+    blocos = _dividir_blocos(md, _MAX_CHARS_LLM)
 
-    try:
-        resultado = _completar([{"role": "user", "content": prompt}], config)
-        if len(md) > _MAX_CHARS_LLM:
-            resultado = resultado + "\n\n" + md[_MAX_CHARS_LLM:]
-        return resultado, []
-    except Exception as exc:
-        # Não inclui str(exc) no aviso — pode conter URL, credencial ou path
-        # do ambiente (CWE-209/532). Só o nome do tipo é exposto.
-        return md, [f"LLM enhancement falhou ({type(exc).__name__})"]
+    if len(blocos) == 1:
+        prompt = _PROMPT_MELHORIA.format(nome=origem.name, md=md)
+        try:
+            resultado = _completar([{"role": "user", "content": prompt}], config)
+            return resultado, []
+        except Exception as exc:
+            # Não inclui str(exc) no aviso — pode conter URL, credencial ou path
+            # do ambiente (CWE-209/532). Só o nome do tipo é exposto.
+            return md, [f"LLM enhancement falhou ({type(exc).__name__})"]
+
+    enviados = blocos[:_MAX_BLOCOS_LLM]
+    partes: list[str] = []
+    tipos_falha: list[str] = []
+    for bloco in enviados:
+        prompt = _PROMPT_MELHORIA.format(nome=origem.name, md=bloco)
+        try:
+            melhorado = _completar([{"role": "user", "content": prompt}], config)
+        except Exception as exc:
+            # Bloco que falha mantém o texto original; os demais seguem.
+            partes.append(bloco)
+            tipos_falha.append(type(exc).__name__)
+            continue
+        # Preserva as quebras de borda ORIGINAIS do bloco: um corte após um único
+        # "\n" (dentro de uma tabela, por exemplo) não pode virar linha em branco.
+        inicio = bloco[: len(bloco) - len(bloco.lstrip("\n"))]
+        fim = bloco[len(bloco.rstrip("\n")):]
+        partes.append(inicio + melhorado.strip("\n") + fim)
+
+    avisos: list[str] = []
+    n = len(enviados)
+    if tipos_falha:
+        tipos = ", ".join(sorted(set(tipos_falha)))
+        avisos.append(f"LLM enhancement falhou em {len(tipos_falha)} de {n} blocos ({tipos})")
+    if len(blocos) > _MAX_BLOCOS_LLM:
+        avisos.append(
+            f"LLM aplicado só aos primeiros {_MAX_BLOCOS_LLM} blocos; "
+            "o resto do documento ficou sem melhoria"
+        )
+
+    # Blocos com falha ou além do teto entram como estão; se todos falharam,
+    # a junção reproduz `md` exatamente.
+    partes.extend(blocos[n:])
+    return "".join(partes), avisos
+
+
+def _dividir_blocos(md: str, limite: int) -> list[str]:
+    """
+    Corta o Markdown em blocos de no máximo `limite` caracteres.
+
+    A concatenação dos blocos é exatamente `md`. Para cada bloco que começa em
+    `i`, o corte vai para a MAIOR posição `p` com `i < p <= i + limite`, por
+    prioridade: (1) após uma linha em branco fora de bloco de código; (2) após
+    qualquer `\n`; (3) corte seco em `i + limite`.
+
+    Blocos de código (linhas que começam com ``` ou ~~~) são rastreados uma
+    única vez sobre o texto inteiro, para não cortar dentro de uma cerca.
+    """
+    n = len(md)
+    if n <= limite:
+        return [md]
+
+    # Uma varredura linear coleta as posições candidatas, já em ordem crescente.
+    cortes_branco: list[int] = []
+    cortes_quebra: list[int] = []
+    em_cerca = False
+    inicio = 0
+    while inicio < n:
+        fim = md.find("\n", inicio)
+        fim = n if fim == -1 else fim + 1
+        linha = md[inicio:fim]
+        if linha.lstrip().startswith(("```", "~~~")):
+            em_cerca = not em_cerca
+        if linha.endswith("\n"):
+            cortes_quebra.append(fim)
+            if linha.strip() == "" and not em_cerca:
+                cortes_branco.append(fim)
+        inicio = fim
+
+    blocos: list[str] = []
+    i = 0
+    while n - i > limite:
+        teto = i + limite
+        p = teto  # prioridade 3: corte seco
+        for candidatos in (cortes_branco, cortes_quebra):
+            k = bisect.bisect_right(candidatos, teto) - 1
+            if k >= 0 and candidatos[k] > i:
+                p = candidatos[k]
+                break
+        blocos.append(md[i:p])
+        i = p
+    blocos.append(md[i:])
+    return blocos
 
 
 def ocr_com_visao(

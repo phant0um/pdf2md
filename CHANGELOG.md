@@ -17,6 +17,10 @@ Versioning follows [SemVer](https://semver.org/).
   rodava sempre que `PDF2MD_LLM_URL` estava definida, enviando imagens e páginas
   escaneadas para um provider remoto sem opt-in (privacidade e custo), e ignorava
   as flags. O alt-text de `--imagens ambos` nunca vai ao LLM.
+- `--llm` melhorava só os primeiros 12 000 caracteres e colava o resto sem melhoria,
+  em silêncio. Agora o documento vai ao LLM em blocos cortados entre parágrafos (fora
+  de blocos de código), até 20 blocos (~240 mil caracteres), com aviso quando passa
+  disso ou quando um bloco falha.
 
 ### Fixed
 
