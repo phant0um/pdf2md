@@ -548,3 +548,12 @@ def test_cli_llm_testar_sem_json_falha_exit_1():
     saida = _sem_ansi(result.output)
     assert "Inacessível" in saida
     assert "HTTP 401" in saida
+
+
+def test_cli_workers_zero_rejeitado_sem_traceback(tmp_path):
+    """--workers 0 → erro de uso do Typer, não ValueError do ThreadPoolExecutor."""
+    f = tmp_path / "a.csv"
+    f.write_text("a,b\n1,2\n", encoding="utf-8")
+    result = runner.invoke(app, ["converter", str(f), str(tmp_path / "out"), "--workers", "0"])
+    assert result.exit_code == 2
+    assert not isinstance(result.exception, ValueError)

@@ -38,7 +38,7 @@ from core.utils import (
 
 app = typer.Typer(
     name="pdf2md",
-    help="Converte PDFs, imagens e documentos Word em Markdown. Suporte a batch e Obsidian vault.",
+    help="Converte PDFs, imagens, Word, PPTX e planilhas em Markdown. Suporte a batch e Obsidian vault.",
     add_completion=False,
 )
 
@@ -121,6 +121,8 @@ def main() -> None:
         else:
             sys.argv.insert(1, "converter")
     app()
+
+
 console = Console(stderr=True)
 
 
@@ -176,7 +178,7 @@ def _silenciar_stdout_nativo() -> Iterator[None]:
 def _requer_ocr(origem: Path) -> bool:
     """
     True se a entrada pode exigir OCR (imagens ou PDFs).
-    Documentos Word (.doc/.docx) usam mammoth/antiword e dispensam Tesseract,
+    Documentos Word (.doc/.docx) usam mammoth/textutil e dispensam Tesseract,
     então uma conversão só de Word não deve ser bloqueada por Tesseract ausente.
     """
     ocr_exts = EXTENSOES_IMAGEM | EXTENSOES_PDF
@@ -193,14 +195,15 @@ def converter(
     destino: Path = typer.Argument(
         Path("."), help="Diretório de saída (padrão: diretório atual)"
     ),
-    workers: int = typer.Option(4, "--workers", "-w", help="Processos paralelos"),
+    # min=1: ThreadPoolExecutor(max_workers=0) levantava ValueError com traceback.
+    workers: int = typer.Option(4, "--workers", "-w", min=1, help="Threads paralelas"),
     sobrescrever: bool = typer.Option(False, "--sobrescrever", help="Sobrescreve MDs existentes"),
     vault: Path | None = typer.Option(None, "--vault", help="Path do Obsidian vault. Output vai direto para vault/"),
     obsidian: bool = typer.Option(False, "--obsidian", help="Adiciona frontmatter Obsidian ao MD"),
     llm_fallback: bool = typer.Option(
         False, "--llm-fallback",
-        help="Usa LLM local (Ollama) para melhorar qualidade quando detectados problemas. "
-             "Configura via PDF2MD_LLM_URL / PDF2MD_LLM_MODEL.",
+        help="Usa LLM (Ollama local ou provedor remoto) para melhorar qualidade quando "
+             "detectados problemas. Configura via PDF2MD_LLM_URL / PDF2MD_LLM_MODEL.",
     ),
     usar_llm: bool = typer.Option(
         False, "--llm",
@@ -253,7 +256,7 @@ def converter(
         raise typer.Exit(code=1) from exc
 
     # Verifica Tesseract apenas se a entrada puder exigir OCR.
-    # (.docx/.doc usam mammoth/antiword e não dependem de Tesseract.)
+    # (.docx/.doc usam mammoth/textutil e não dependem de Tesseract.)
     if _requer_ocr(origem) and not verificar_tesseract():
         msg = (
             "[red]Tesseract não encontrado. "

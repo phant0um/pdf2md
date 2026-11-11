@@ -30,13 +30,13 @@ brew install tesseract tesseract-lang
 
 1. Download `PDF2MD-vX.X.X.dmg` from [Releases](https://github.com/phant0um/pdf2md/releases)
 2. Drag **PDF2MD.app** to Applications
-3. **First launch:** right-click → Open (Gatekeeper bypass — app is ad-hoc signed)
+3. **First launch:** right-click → Open (Gatekeeper bypass — app is not notarized)
 4. Install Tesseract (step above)
 
 ### Adding files
 
 Three ways to add files for conversion:
-- **Drag and drop** files or folders onto the drop zone
+- **Drag and drop** files onto the drop zone (folders are not accepted — use the CLI for a whole folder)
 - **Browse files…** — opens a multi-format file picker
 - **Paste image** — pastes an image from the clipboard directly into the queue (screenshots, browser copies)
 
@@ -105,10 +105,12 @@ pdf2md docs/ output/ --llm-fallback --llm-url https://api.groq.com/openai/v1 --l
 # LLM always (regardless of quality)
 pdf2md docs/ output/ --llm
 
+# Vision OCR fallback (Tesseract < 10 chars → LLM vision) runs only with --llm or --llm-fallback, using the same --llm-url/--llm-modelo; alt-text OCR never goes to the LLM
+
 # Ignore page headers and footers (5% of page height from top and bottom)
 pdf2md document.pdf output/ --ignorar-margens 5
 
-# Extract embedded images as files (PDF only) + link them in the MD
+# Extract embedded images as files (PDF and DOCX) + link them in the MD
 pdf2md document.pdf output/ --imagens extrair
 
 # Extract + OCR each image as the link's alt-text
@@ -125,7 +127,7 @@ pdf2md llm modelos --json    # → {"ok":true,"modelos":[{"id":"...","visao":tru
 pdf2md llm testar --json     # → {"ok":true,"latencia_ms":42}
 ```
 
-### `--imagens` (embedded images, PDF only)
+### `--imagens` (embedded images, PDF and DOCX)
 
 | Mode | Behavior |
 |------|----------|
@@ -138,7 +140,7 @@ pdf2md llm testar --json     # → {"ok":true,"latencia_ms":42}
 - Identical images are deduplicated by SHA-256 (1 file, N links).
 - Security: filenames are always generated (never from PDF metadata), symlinked
   assets dirs are refused, and hard limits apply (500 images/doc, 50 MB/image).
-- Non-PDF files are converted normally with a warning (PDF-only feature).
+- Other formats are converted normally with a warning (the flag applies to PDF and DOCX only).
 
 ### LLM configuration
 
@@ -152,6 +154,7 @@ Precedence: `--llm-url` / `--llm-modelo` flags > env vars > defaults. The API ke
 | OpenCode Go | `https://opencode.ai/zen/go/v1` | `grok-4.5` |
 | Gemini Flash (free tier) | `https://generativelanguage.googleapis.com/v1beta/openai/` | `gemini-2.0-flash` |
 | Groq (fast, free) | `https://api.groq.com/openai/v1` | `llama-3.1-8b-instant` |
+| OpenRouter | `https://openrouter.ai/api/v1` | `anthropic/claude-3.5-sonnet` |
 
 ## Quality pipeline
 
@@ -161,7 +164,7 @@ Every conversion runs through an automatic pipeline:
 2. **Artifact cleanup** — removes soft hyphens (U+00AD), zero-width chars, BOM
 3. **Validation** — detects residual issues and shows ⚠ warnings in CLI and GUI
 
-Files with quality issues show an amber icon (✓ orange) in the GUI and `done⚠` status in the CLI.
+Files with quality issues show an amber icon (✓ orange) in the GUI and `concluido⚠` status in the CLI.
 
 ## Development
 

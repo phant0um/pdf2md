@@ -125,7 +125,6 @@ def _montar_contexto(
     """Constrói o contexto de assets do documento (None p/ transcrever)."""
     if modo_imagem in (ModoImagem.transcrever, ModoImagem.ignorar):
         return None
-    from core.image_assets import ColetorAssets
 
     # Resolvido desde o início: no macOS /var é symlink de /private/var e o
     # containment assert de caminho_seguro compara paths resolvidos.
