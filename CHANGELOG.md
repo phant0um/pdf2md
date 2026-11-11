@@ -5,6 +5,10 @@ Versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/progress.md` (parado no Ciclo 10) e os três relatórios de auditoria/revisão de agosto foram para `docs/historico/`, com nota de arquivamento; links do progress apontam para `phant0um/pdf2md`.
+
 ## [0.6.1] — 2026-11-07
 
 ### Added
