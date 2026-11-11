@@ -5,6 +5,14 @@ Versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- CI: push só em `main`, `pull_request` para qualquer base (PRs empilhados), e run
+  anterior do mesmo PR cancelado. Antes cada push em branch com PR rodava o workflow
+  duas vezes. Em PR, push novo cancela o run anterior do mesmo PR; em `main` cada
+  commit roda (grupo de concorrência por SHA). Flags do PyInstaller numa fonte única, `scripts/pyinstaller_cli.sh`,
+  usada pelo CI e pelo `build_app.sh`.
+
 ### Security
 
 - Pillow 12.3.0 → 13.0.0: 39 advisories (PYSEC-2026-4326 e seguintes) apontadas
