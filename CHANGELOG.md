@@ -5,6 +5,24 @@ Versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `--workers 0` (ou negativo) derrubava o CLI com traceback do
+  `ThreadPoolExecutor`; agora é erro de uso (`min=1`).
+- CSV com célula entre aspas contendo quebra de linha colava as palavras
+  (`splitlines()` antes do `csv.reader`); CR/CRLF em células de tabela também
+  viram espaço.
+- `--llm`/`--llm-fallback`: resposta cortada em `max_tokens`
+  (`finish_reason: length`) substituía o documento por texto truncado; agora o
+  original é mantido com aviso.
+- `--imagens ambos` com `--obsidian` rodava OCR por imagem e descartava o
+  resultado (wikilink não tem alt-text).
+- GUI (Preferências): a lista de modelos do provider e o botão "Testar" exigiam
+  modelo já escolhido — trocar de provider zerava o modelo e a lista ficava
+  presa na estática.
+- `scripts/build_app.sh` abortava sem venv ativo (`VIRTUAL_ENV: unbound
+  variable`); agora cai no `.venv/` do `uv sync`.
+
 ## [0.6.1] — 2026-11-07
 
 ### Added

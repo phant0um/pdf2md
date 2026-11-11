@@ -145,8 +145,8 @@ def _converter_arquivo(
     """
     Despacha para o conversor correto baseado na extensão. None = não suportado.
 
-    `--imagens` é PDF-only: só pdf_to_md recebe o modo (padrão de
-    `ignorar_margens`); outros formatos ganham um aviso, não erro.
+    `--imagens` vale para PDF e DOCX: só pdf_to_md/doc_to_md recebem o
+    modo; outros formatos ganham um aviso, não erro.
     """
     sufixo = origem.suffix.lower()
     conversor = next(
@@ -302,7 +302,7 @@ def batch_convert(
 
     Comportamento:
     - Se `origem` é arquivo único: processa só ele
-    - Se `origem` é diretório: varre recursivamente (não recursivo por padrão — só nível raiz)
+    - Se `origem` é diretório: processa só o nível raiz (não recursivo)
     - Arquivos com extensão não suportada: StatusArquivo.IGNORADO (sem erro)
     - `sobrescrever=False`: pula arquivos já existentes no destino
     - `vault` definido: output vai direto para `vault/` (cria se não existir)
@@ -313,7 +313,7 @@ def batch_convert(
     Args:
         origem: Arquivo ou diretório de entrada.
         destino: Diretório de saída (criado se não existir). Ignorado se vault definido.
-        workers: Número de processos paralelos.
+        workers: Número de threads paralelas.
         sobrescrever: Se True, sobrescreve MDs existentes.
         vault: Path para raiz do Obsidian vault. Output vai direto para vault/.
         obsidian: Se True, adiciona frontmatter Obsidian ao MD gerado.

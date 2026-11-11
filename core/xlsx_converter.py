@@ -9,13 +9,15 @@ Nota: .xls (formato legado) não suportado — requer xlrd e o formato está
 obsoleto desde Excel 2007. Usuários devem converter para .xlsx primeiro.
 """
 import csv
+import io
 from pathlib import Path
 from typing import Any
 
 from core.utils import _linha_tabela_md, _sanitizar_celula_md, _validar_existencia
 
 # Encodings tentados em cascade para CSV — latin-1 nunca falha (mapeia 256 bytes).
-_CSV_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")
+# utf-8-sig cobre UTF-8 com e sem BOM.
+_CSV_ENCODINGS = ("utf-8-sig", "cp1252", "latin-1")
 
 
 def planilha_to_md(path: Path) -> str:
@@ -120,22 +122,24 @@ def _csv_para_md(path: Path) -> str:
     for enc in _CSV_ENCODINGS:
         try:
             texto = dados.decode(enc)
-            rows = list(csv.reader(texto.splitlines()))
-            break
         except UnicodeDecodeError:
             continue
+        # StringIO com newline="" (não splitlines): célula entre aspas com
+        # quebra de linha chega inteira ao csv.reader — splitlines colava
+        # as palavras ("linha1\nlinha2" virava "linha1linha2").
+        rows = list(csv.reader(io.StringIO(texto, newline="")))
+        break
 
     if not rows:
         return ""
 
     headers = [_celula_str(c) for c in rows[0]]
     linhas: list[str] = []
-    linhas.append("| " + " | ".join(headers) + " |")
-    linhas.append("| " + " | ".join(["---"] * len(headers)) + " |")
+    linhas.append(_linha_tabela_md(headers))
+    linhas.append(_linha_tabela_md(["---"] * len(headers)))
 
     for row in rows[1:]:
-        celulas = [_celula_str(c) for c in row]
-        linhas.append("| " + " | ".join(celulas) + " |")
+        linhas.append(_linha_tabela_md([_celula_str(c) for c in row]))
 
     return "\n".join(linhas)
 

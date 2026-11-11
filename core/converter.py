@@ -332,7 +332,8 @@ def _anexar_imagens_embutidas(
     links: list[str] = []
     for asset in assets:
         alt = "imagem"
-        if contexto.modo == ModoImagem.ambos and not asset.duplicado:
+        # Wikilink `![[nome]]` não carrega alt-text — OCR aqui seria descartado.
+        if contexto.modo == ModoImagem.ambos and not asset.duplicado and not contexto.wikilinks:
             alt = alt_text_enxuto(ocr_bytes(asset.dados, asset.extensao))
         links.append(_link_arquivo(asset.nome, asset.caminho_disco, contexto, alt))
 

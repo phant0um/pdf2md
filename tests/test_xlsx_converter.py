@@ -221,3 +221,14 @@ def test_celula_str_quebra_linha():
 
 def test_celula_str_numero():
     assert _celula_str(42) == "42"
+
+
+def test_csv_celula_multilinha_entre_aspas(tmp_path):
+    """Célula entre aspas com quebra de linha: palavras separadas por espaço.
+
+    Antes, `splitlines()` antes do csv.reader colava "linha1" e "linha2".
+    """
+    f = tmp_path / "multi.csv"
+    f.write_text('h1,h2\n"linha1\nlinha2",x\n', encoding="utf-8")
+    md = planilha_to_md(f)
+    assert "| linha1 linha2 | x |" in md

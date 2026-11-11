@@ -51,7 +51,7 @@ class ModoImagem(StrEnum):
     """
     Política de tratamento das imagens embutidas em PDFs (flag --imagens).
 
-    PDF-only: outros formatos ignoram a flag (warning no batch).
+    PDF e DOCX: outros formatos ignoram a flag (warning no batch).
     """
 
     transcrever = "transcrever"  # default — OCR só de páginas-scan (byte-idêntico ao atual)
@@ -82,8 +82,18 @@ def _validar_extensao(path: Path, permitidas: frozenset[str]) -> None:
 
 
 def _sanitizar_celula_md(text: str) -> str:
-    """Normaliza texto de célula para Markdown seguro (pipe escaping)."""
-    return text.strip().replace("\n", " ").replace("|", "\\|")
+    """Normaliza texto de célula para Markdown seguro (pipe escaping).
+
+    Quebras de linha (LF, CR, CRLF) viram espaço — dentro da célula
+    elas partiriam a linha da tabela.
+    """
+    return (
+        text.strip()
+        .replace("\r\n", " ")
+        .replace("\n", " ")
+        .replace("\r", " ")
+        .replace("|", "\\|")
+    )
 
 
 def _linha_tabela_md(celulas: list[str]) -> str:
@@ -165,20 +175,9 @@ def sanitizar_mensagem_erro(msg: str) -> str:
         # Caso especial: "/Users/<username>" (exatamente 2 segmentos no
         # padrão macOS) — o basename IS o username, que seria vazado.
         # Redige para "[user]" em vez de expor o nome (CWE-209).
-        # Quando o username contém espaço (ex: "/Users/John Doe"), a
-        # regex casa só "/Users/John" — detectamos esse caso e consomimos
-        # o restante " Doe" da string original para não vazar.
+        # Username com espaço ("/Users/John Doe"): a regex casa só
+        # "/Users/John"; o " Doe" restante é tratado na segunda passada.
         if full.startswith("/Users/") and full.count("/") == 2:
-            # Tenta consumir segmento seguinte com espaço (ex: " Doe")
-            # Olhando o sufixo da string após o match.
-            end = m.end()
-            resto = msg[end:]
-            # Se há " <palavra>" imediatamente após (sem outra barra),
-            # é parte do username com espaço — redige junto.
-            match_resto = re.match(r" (\S+)", resto)
-            if match_resto:
-                # Consome o resto no match — ajustamos end via sub
-                return "[user]"  # o resto " Doe" ainda fica; tratado abaixo
             return "[user]"
         # PurePosixPath.name extrai o último segmento mesmo quando os
         # segmentos intermediários contêm espaço (ex: "/Users/John Doe/

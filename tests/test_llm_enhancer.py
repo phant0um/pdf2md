@@ -624,3 +624,22 @@ def test_testar_json_malformado():
 
     assert resultado["ok"] is False
     assert resultado["erro"] == "JSONDecodeError"
+
+
+def test_melhorar_markdown_resposta_truncada_preserva_original(tmp_path):
+    """finish_reason "length" → resposta cortada em max_tokens.
+
+    Aceitar o texto parcial apagaria o fim do documento em silêncio; o
+    original é mantido e o aviso nomeia a causa.
+    """
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    corpo = json.dumps({
+        "choices": [{"message": {"content": "texto cort"}, "finish_reason": "length"}]
+    }).encode("utf-8")
+
+    with patch("urllib.request.urlopen", return_value=_mock_resp_bytes(corpo)):
+        resultado, avisos = melhorar_markdown("texto original completo", f)
+
+    assert resultado == "texto original completo"
+    assert any("RespostaTruncadaError" in aviso for aviso in avisos)

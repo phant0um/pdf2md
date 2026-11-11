@@ -134,6 +134,17 @@ def test_pdf_imagens_ambos_ocr_como_alt_text(tmp_path):
     assert "![TEXTO OCR DA IMAGEM](imagens_assets/img_p001_0.png)" in md
 
 
+def test_pdf_imagens_ambos_wikilinks_pula_ocr(tmp_path):
+    """Wikilink `![[nome]]` não carrega alt-text: OCR seria trabalho jogado fora."""
+    pdf = _pdf_texto_com_imagens(tmp_path, qtd=1)
+
+    with patch("core.converter.ocr_bytes") as ocr:
+        md = pdf_to_md(pdf, modo_imagem=ModoImagem.ambos, wikilinks=True)
+
+    ocr.assert_not_called()
+    assert "![[img_p001_0.png]]" in md
+
+
 def test_pdf_scan_extrair_persiste_render(tmp_path, mock_tesseract):
     """Página-scan em extrair: render 300dpi persistido como p001_full.png (D3)."""
     path = tmp_path / "scan.pdf"

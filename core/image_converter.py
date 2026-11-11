@@ -77,7 +77,7 @@ def image_to_md(path: Path) -> str:
     3. Redimensiona se largura < 1000px (scale 2x — melhora OCR em imagens pequenas)
     4. OCR via pytesseract com lang='por+eng'
 
-    Resultado: texto extraído envolto em bloco MD simples (sem formatação especial).
+    Resultado: texto extraído cru, sem formatação Markdown adicional.
 
     Args:
         path: Caminho para arquivo de imagem. Extensão deve estar em EXTENSOES_IMAGEM.
