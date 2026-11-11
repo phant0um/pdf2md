@@ -40,12 +40,20 @@ enum ProcessRunner {
     ///   - args: Argumentos (a key do LLM NUNCA entra aqui — só via `env`).
     ///   - env: Environment a injetar (merges com o do processo pai).
     ///   - timeout: Watchdog — conversão presa além deste tempo é encerrada.
+    ///   - entrada: Dados escritos no stdin do processo (ex.: lista NUL-separada
+    ///     de arquivos). `nil` mantém o comportamento antigo (stdin herdado).
+    ///     A escrita roda em background, para nunca travar com pipe cheio.
+    ///   - aoLinhaStdout: Chamado a cada linha do stdout ASSIM QUE ela chega
+    ///     (em background, fora do MainActor). A lista `stdout` do resultado
+    ///     continua completa ao final.
     /// - Returns: stdout, stderr e código de saída (ver `ResultadoProcesso`).
     static func executar(
         binario: URL,
         args: [String],
         env: [String: String]? = nil,
-        timeout: TimeInterval = 30 * 60
+        entrada: Data? = nil,
+        timeout: TimeInterval = 30 * 60,
+        aoLinhaStdout: (@Sendable (String) -> Void)? = nil
     ) async -> ResultadoProcesso {
         // Cancelado antes mesmo de spawnar? Não inicia nada.
         if Task.isCancelled { return .naoIniciado }
@@ -66,10 +74,26 @@ enum ProcessRunner {
         processo.standardOutput = stdoutPipe
         processo.standardError = stderrPipe
 
+        let stdinPipe = Pipe()
+        if entrada != nil {
+            processo.standardInput = stdinPipe
+            // Sem SIGPIPE: se o filho sair sem ler tudo, o write falha com EPIPE
+            // (tratado pelo `try?`) em vez de derrubar o app.
+            _ = fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        }
+
         do {
             try processo.run()
         } catch {
             return .naoIniciado
+        }
+
+        if let entrada {
+            // Background: se o filho não ler tudo, o write bloquearia a task.
+            DispatchQueue.global().async {
+                try? stdinPipe.fileHandleForWriting.write(contentsOf: entrada)
+                try? stdinPipe.fileHandleForWriting.close()
+            }
         }
 
         return await withTaskCancellationHandler {
@@ -94,9 +118,21 @@ enum ProcessRunner {
                     // Leitura concorrente dos dois pipes — sem isto, deadlock
                     // quando o stdout enche o pipe (~64KB) antes do término.
                     async let stderr: Data? = try? stderrPipe.fileHandleForReading.readToEnd()
-                    let dados = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
+                    var linhas: [String] = []
+                    do {
+                        // Linha a linha: eventos do CLI chegam ao caller na hora.
+                        // Pipe fechado no cancelamento/watchdog encerra ou lança
+                        // a sequência; o que já chegou fica em `linhas`.
+                        for try await linha in stdoutPipe.fileHandleForReading.bytes.lines {
+                            linhas.append(linha)
+                            aoLinhaStdout?(linha)
+                        }
+                    } catch {
+                        // Leitura interrompida (pipe fechado): sem stdout adicional.
+                    }
                     let err = await stderr
                     processo.waitUntilExit()
+                    let dados = linhas.joined(separator: "\n").data(using: .utf8) ?? Data()
                     resumir(ResultadoProcesso(
                         stdout: dados.isEmpty ? nil : dados,
                         stderr: err,

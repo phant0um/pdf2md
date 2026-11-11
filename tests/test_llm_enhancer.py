@@ -202,39 +202,217 @@ def test_melhorar_markdown_retorna_original_em_falha(tmp_path):
     assert "falhou" in avisos[0].lower()
 
 
-def test_melhorar_markdown_trunca_input_longo(tmp_path):
-    """Input longo (>12000 chars) é truncado antes de enviar ao LLM."""
-    f = tmp_path / "grande.pdf"
-    f.write_bytes(b"x")
-    md_longo = "palavra " * 5000  # ~40000 chars
+def test_melhorar_markdown_envia_documento_longo_em_blocos(tmp_path, monkeypatch):
+    """Doc acima do limite vai em blocos: o último bloco também chega ao LLM."""
+    import core.llm_enhancer as le
 
-    chamadas = []
-
-    def capturar_urlopen(req, timeout=None):
-        chamadas.append(req.data)
-        return _mock_response("resultado")
-
-    with patch("urllib.request.urlopen", side_effect=capturar_urlopen):
-        melhorar_markdown(md_longo, f)
-
-    # Verifica que o payload enviado é menor que o original
-    assert len(chamadas) == 1
-    payload_str = chamadas[0].decode("utf-8")
-    assert len(payload_str) < len(md_longo)
-
-
-def test_melhorar_markdown_junta_restante_apos_truncamento(tmp_path):
-    """Tail do documento (>12000 chars) é preservada no output."""
+    monkeypatch.setattr(le, "_MAX_CHARS_LLM", 50)
     f = tmp_path / "doc.pdf"
     f.write_bytes(b"x")
-    cabeca = "início " * 2000    # ~14000 chars (acima do threshold)
-    cauda = "\n\nFim importante"
-    md_longo = cabeca + cauda
+    paragrafos = ["Paragrafo um " * 3, "Paragrafo dois " * 3, "FIM-UNICO-" + "z" * 20]
+    md = "\n\n".join(paragrafos)
 
-    with patch("urllib.request.urlopen", return_value=_mock_response("cabeça melhorada")):
-        resultado, _ = melhorar_markdown(md_longo, f)
+    prompts: list[str] = []
 
-    assert "Fim importante" in resultado  # cauda preservada
+    def fake_completar(mensagens, config=None):
+        conteudo = mensagens[0]["content"]
+        prompts.append(conteudo)
+        bloco = conteudo.split("comentários.\n\n", 1)[1]
+        return bloco.strip("\n").upper()
+
+    with patch("core.llm_enhancer._completar", side_effect=fake_completar):
+        resultado, avisos = melhorar_markdown(md, f)
+
+    assert len(prompts) == 3
+    assert "FIM-UNICO-" in prompts[-1]
+    for paragrafo in paragrafos:
+        assert paragrafo.strip().upper() in resultado
+    assert avisos == []
+
+
+def test_melhorar_markdown_bloco_que_falha_mantem_original(tmp_path, monkeypatch):
+    """Bloco do meio com RespostaTruncadaError fica original; os outros melhoram."""
+    import core.llm_enhancer as le
+    from core.llm_enhancer import RespostaTruncadaError
+
+    monkeypatch.setattr(le, "_MAX_CHARS_LLM", 50)
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    blocos_orig = ["aaa " * 8, "bbb " * 8, "ccc " * 8]
+    md = "\n\n".join(blocos_orig)
+
+    chamada = {"n": 0}
+
+    def fake_completar(mensagens, config=None):
+        chamada["n"] += 1
+        if chamada["n"] == 2:
+            raise RespostaTruncadaError("cortada")
+        return "MELHORADO"
+
+    with patch("core.llm_enhancer._completar", side_effect=fake_completar):
+        resultado, avisos = melhorar_markdown(md, f)
+
+    assert chamada["n"] == 3
+    assert "bbb" in resultado and "MELHORADO" in resultado
+    assert resultado.count("MELHORADO") == 2
+    assert len(avisos) == 1
+    assert "1 de 3" in avisos[0]
+    assert "RespostaTruncadaError" in avisos[0]
+
+
+def test_melhorar_markdown_todos_os_blocos_falham_devolve_original(tmp_path, monkeypatch):
+    """Se todos os blocos enviados falham, o resultado é o md exato + um aviso."""
+    import core.llm_enhancer as le
+
+    monkeypatch.setattr(le, "_MAX_CHARS_LLM", 50)
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    md = "\n\n".join(["aaa " * 8, "bbb " * 8, "ccc " * 8])
+
+    with patch("core.llm_enhancer._completar", side_effect=OSError("rede")):
+        resultado, avisos = melhorar_markdown(md, f)
+
+    assert resultado == md
+    assert len(avisos) == 1
+    assert "OSError" in avisos[0]
+
+
+def test_melhorar_markdown_limite_de_blocos(tmp_path, monkeypatch):
+    """Acima de _MAX_BLOCOS_LLM só os primeiros blocos vão ao LLM; o resto fica original."""
+    import core.llm_enhancer as le
+
+    monkeypatch.setattr(le, "_MAX_CHARS_LLM", 50)
+    monkeypatch.setattr(le, "_MAX_BLOCOS_LLM", 2)
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    blocos_orig = ["q1 " * 8, "q2 " * 8, "q3 " * 8, "q4 " * 8]
+    md = "\n\n".join(blocos_orig)
+
+    with patch("core.llm_enhancer._completar", return_value="MELHORADO") as mock:
+        resultado, avisos = melhorar_markdown(md, f)
+
+    assert mock.call_count == 2
+    assert "q3" in resultado and "q4" in resultado
+    assert resultado.count("MELHORADO") == 2
+    assert any("primeiros 2 blocos" in aviso for aviso in avisos)
+
+
+def _bloco_do_prompt(mensagens):
+    return mensagens[0]["content"].split("comentários.\n\n", 1)[1]
+
+
+def test_melhorar_markdown_tabela_longa_nao_ganha_linha_em_branco(tmp_path, monkeypatch):
+    """Tabela sem linhas em branco cortada após um único \\n volta idêntica (LLM identidade)."""
+    import core.llm_enhancer as le
+
+    monkeypatch.setattr(le, "_MAX_CHARS_LLM", 80)
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    md = "| a | b |\n|---|---|\n" + "".join(f"| {i} | x{i} |\n" for i in range(40))
+    assert len(le._dividir_blocos(md, 80)) > 2
+
+    with patch(
+        "core.llm_enhancer._completar",
+        side_effect=lambda msgs, cfg=None: _bloco_do_prompt(msgs),
+    ):
+        resultado, avisos = melhorar_markdown(md, f)
+
+    assert resultado == md
+    assert "\n\n" not in resultado
+    assert avisos == []
+
+
+def test_melhorar_markdown_preserva_separadores_originais_com_llm_que_adiciona_quebras(
+    tmp_path, monkeypatch
+):
+    """Quebras que o LLM põe nas bordas da resposta não alteram os separadores originais."""
+    import core.llm_enhancer as le
+
+    monkeypatch.setattr(le, "_MAX_CHARS_LLM", 50)
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    md = "\n\n".join(["aaa " * 8, "bbb " * 8, "ccc " * 8])
+
+    with patch(
+        "core.llm_enhancer._completar",
+        side_effect=lambda msgs, cfg=None: "\n\n\n" + _bloco_do_prompt(msgs).strip("\n") + "\n\n\n",
+    ):
+        resultado, avisos = melhorar_markdown(md, f)
+
+    assert resultado == md
+    assert avisos == []
+
+
+def test_melhorar_markdown_doc_no_limite_uma_chamada(tmp_path):
+    """Doc com até o limite: uma chamada e o retorno é a saída do LLM sem mudança."""
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    md = "texto curto\n\nsegundo parágrafo"
+
+    with patch("core.llm_enhancer._completar", return_value="SAIDA") as mock:
+        resultado, avisos = melhorar_markdown(md, f)
+
+    assert mock.call_count == 1
+    assert resultado == "SAIDA"
+    assert avisos == []
+
+
+# ── _dividir_blocos() ─────────────────────────────────────────────────────────
+
+def test_dividir_blocos_texto_curto_fica_inteiro():
+    from core.llm_enhancer import _dividir_blocos
+
+    assert _dividir_blocos("curto", 100) == ["curto"]
+    assert _dividir_blocos("", 100) == [""]
+
+
+def test_dividir_blocos_corta_entre_paragrafos():
+    from core.llm_enhancer import _dividir_blocos
+
+    md = "\n\n".join(f"Paragrafo {i} " + "x" * 30 for i in range(20))
+    blocos = _dividir_blocos(md, 120)
+
+    assert "".join(blocos) == md
+    assert all(len(b) <= 120 for b in blocos)
+    assert len(blocos) > 1
+    for b in blocos[:-1]:
+        assert b.endswith("\n\n")
+
+
+def test_dividir_blocos_nao_corta_dentro_de_cerca():
+    from core.llm_enhancer import _dividir_blocos
+
+    cerca = "```\n" + "linha\n\n" * 10 + "```\n"
+    md = "a" * 40 + "\n\n" + cerca + "\n\n" + "b" * 40
+    blocos = _dividir_blocos(md, 120)
+
+    assert "".join(blocos) == md
+    inicio_cerca = md.index("```")
+    fim_cerca = md.index("```", inicio_cerca + 3) + 3
+    for b_inicio in (sum(len(x) for x in blocos[:k]) for k in range(1, len(blocos))):
+        assert not (inicio_cerca < b_inicio < fim_cerca), "corte dentro da cerca"
+
+
+def test_dividir_blocos_sem_linha_em_branco_corta_apos_quebra():
+    from core.llm_enhancer import _dividir_blocos
+
+    md = "\n".join(f"linha {i} " + "y" * 20 for i in range(30))
+    blocos = _dividir_blocos(md, 100)
+
+    assert "".join(blocos) == md
+    assert all(len(b) <= 100 for b in blocos)
+    for b in blocos[:-1]:
+        assert b.endswith("\n")
+
+
+def test_dividir_blocos_linha_maior_que_limite_corte_seco():
+    from core.llm_enhancer import _dividir_blocos
+
+    md = "x" * 250
+    blocos = _dividir_blocos(md, 100)
+
+    assert "".join(blocos) == md
+    assert [len(b) for b in blocos] == [100, 100, 50]
 
 
 # ── ocr_com_visao() ───────────────────────────────────────────────────────────
@@ -642,4 +820,131 @@ def test_melhorar_markdown_resposta_truncada_preserva_original(tmp_path):
         resultado, avisos = melhorar_markdown("texto original completo", f)
 
     assert resultado == "texto original completo"
+    assert any("RespostaTruncadaError" in aviso for aviso in avisos)
+
+
+def test_bloco_so_quebras_nao_duplica(tmp_path, monkeypatch):
+    """Bloco só de "\\n" não vai ao LLM e não é duplicado na junção (LLM identidade)."""
+    import core.llm_enhancer as le
+
+    monkeypatch.setattr(le, "_MAX_CHARS_LLM", 50)
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    md = "aaa " * 8 + "\n" * 100 + "bbb " * 8
+    # Garante que o corte cai numa corrida de quebras e gera bloco só de "\n".
+    assert any(b.strip() == "" for b in le._dividir_blocos(md, 50))
+
+    enviados: list[str] = []
+
+    def identidade(msgs, cfg=None):
+        corpo = _bloco_do_prompt(msgs)
+        enviados.append(corpo)
+        return corpo
+
+    with patch("core.llm_enhancer._completar", side_effect=identidade):
+        resultado, avisos = melhorar_markdown(md, f)
+
+    assert resultado == md
+    assert avisos == []
+    assert all(corpo.strip() for corpo in enviados)
+
+
+def test_resposta_vazia_mantem_bloco(tmp_path, monkeypatch):
+    """Resposta vazia do LLM num bloco mantém o original e registra RespostaVazia."""
+    import core.llm_enhancer as le
+
+    monkeypatch.setattr(le, "_MAX_CHARS_LLM", 50)
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    md = "\n\n".join(["aaa " * 8, "bbb " * 8, "ccc " * 8])
+
+    chamada = {"n": 0}
+
+    def fake_completar(msgs, cfg=None):
+        chamada["n"] += 1
+        if chamada["n"] == 1:
+            return ""
+        return _bloco_do_prompt(msgs)
+
+    with patch("core.llm_enhancer._completar", side_effect=fake_completar):
+        resultado, avisos = melhorar_markdown(md, f)
+
+    assert resultado == md
+    assert len(avisos) == 1
+    assert "RespostaVazia" in avisos[0]
+    assert "1 de 3" in avisos[0]
+
+
+def test_resposta_vazia_um_bloco_devolve_original(tmp_path):
+    """Doc de um bloco com resposta vazia (ou só espaços) devolve o md + aviso."""
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    md = "texto curto\n\nsegundo parágrafo"
+
+    for resposta in ("", "   \n"):
+        with patch("core.llm_enhancer._completar", return_value=resposta):
+            resultado, avisos = melhorar_markdown(md, f)
+
+        assert resultado == md
+        assert avisos == ["LLM enhancement falhou (RespostaVazia)"]
+
+
+def test_propriedade_identidade_preserva_markdown(tmp_path, monkeypatch):
+    """Com LLM identidade, a saída é igual à entrada para md aleatórios (seed fixa)."""
+    import random
+
+    import core.llm_enhancer as le
+
+    monkeypatch.setattr(le, "_MAX_CHARS_LLM", 60)
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    rng = random.Random(20261111)
+
+    def md_aleatorio() -> str:
+        pecas: list[str] = []
+        for _ in range(rng.randint(3, 12)):
+            sorteio = rng.random()
+            if sorteio < 0.3:
+                pecas.append(" ".join(rng.choice(["palavra", "texto", "x"]) for _ in range(rng.randint(1, 6))))
+            elif sorteio < 0.45:
+                pecas.append("\n" * rng.randint(2, 40))  # corrida longa de quebras
+            elif sorteio < 0.6:
+                pecas.append("\n")  # quebra isolada
+            elif sorteio < 0.75:
+                linhas = "".join(f"| {i} | x |\n" for i in range(rng.randint(1, 8)))
+                pecas.append("| a | b |\n|---|---|\n" + linhas)
+            else:
+                pecas.append("## Título\n\n")
+            pecas.append(rng.choice(["", "\n", "\n\n"]))
+        return "".join(pecas)
+
+    def identidade(msgs, cfg=None):
+        corpo = _bloco_do_prompt(msgs)
+        assert corpo.strip()  # nunca envia bloco vazio
+        return corpo
+
+    with patch("core.llm_enhancer._completar", side_effect=identidade):
+        for _ in range(200):
+            md = md_aleatorio()
+            resultado, avisos = melhorar_markdown(md, f)
+            assert resultado == md
+            assert all("falhou" not in aviso for aviso in avisos)
+
+
+def test_ocr_com_visao_truncado_nao_usa_texto(tmp_path):
+    """finish_reason "length" no OCR com visão → texto vazio + aviso, nunca o parcial.
+
+    Mesmo contrato de melhorar_markdown: a resposta cortada não entra no Markdown.
+    """
+    img = tmp_path / "scan.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 100)
+    corpo = json.dumps({
+        "choices": [{"message": {"content": "texto cort"}, "finish_reason": "length"}]
+    }).encode("utf-8")
+
+    with patch("urllib.request.urlopen", return_value=_mock_resp_bytes(corpo)):
+        resultado, avisos = ocr_com_visao(img)
+
+    assert resultado == ""
+    assert "texto cort" not in resultado
     assert any("RespostaTruncadaError" in aviso for aviso in avisos)

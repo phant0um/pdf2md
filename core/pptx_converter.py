@@ -17,6 +17,9 @@ def pptx_to_md(path: Path) -> str:
     - Placeholder título (idx=0) → heading (### texto)
     - Corpo → parágrafos não-vazios preservados
     - Tabelas → tabela Markdown
+    - Caixas de texto soltas (não placeholder) → parágrafos, sem heading
+    - Grupos → shapes internos extraídos em ordem, recursivamente
+    - Notas do orador → bloco de citação "Notas do orador" após o corpo do slide
     - Imagens → omitidas (sem OCR; usar image_converter separadamente se necessário)
 
     Args:
@@ -49,12 +52,21 @@ def pptx_to_md(path: Path) -> str:
         partes.append(f"## Slide {num_slide}")
         for shape in slide.shapes:
             _processar_shape(shape, partes)
+        _processar_notas(slide, partes)
 
     return "\n\n".join(partes)
 
 
 def _processar_shape(shape: Any, partes: list[str]) -> None:
-    """Extrai conteúdo de um shape (tabela, título ou corpo) para a lista de partes."""
+    """Extrai conteúdo de um shape (grupo, tabela, título ou corpo) para a lista de partes."""
+    from pptx.shapes.group import GroupShape  # lazy import, como em pptx_to_md
+
+    # isinstance em vez de shape_type: shape_type levanta em p:sp sem geometria
+    if isinstance(shape, GroupShape):
+        for interno in shape.shapes:
+            _processar_shape(interno, partes)
+        return
+
     if shape.has_table:
         md_tabela = _tabela_para_md(shape.table)
         if md_tabela:
@@ -68,11 +80,8 @@ def _processar_shape(shape: Any, partes: list[str]) -> None:
     if not texto_shape:
         return
 
-    eh_titulo = (
-        hasattr(shape, "placeholder_format")
-        and shape.placeholder_format is not None
-        and shape.placeholder_format.idx == 0
-    )
+    # placeholder_format levanta ValueError em caixa de texto comum, por isso is_placeholder primeiro
+    eh_titulo = shape.is_placeholder and shape.placeholder_format.idx == 0
 
     if eh_titulo:
         partes.append(f"### {texto_shape}")
@@ -81,6 +90,23 @@ def _processar_shape(shape: Any, partes: list[str]) -> None:
             linha = para.text.strip()
             if linha:
                 partes.append(linha)
+
+
+def _processar_notas(slide: Any, partes: list[str]) -> None:
+    """Adiciona as notas do orador do slide como bloco de citação, se houver texto."""
+    # has_notes_slide antes de notes_slide: o acesso cria a notes slide se ela não existe
+    if not slide.has_notes_slide:
+        return
+    frame = slide.notes_slide.notes_text_frame
+    if frame is None:
+        return
+
+    linhas = [para.text.strip() for para in frame.paragraphs if para.text.strip()]
+    if not linhas:
+        return
+
+    bloco = ["> **Notas do orador**"] + [f"> {linha}" for linha in linhas]
+    partes.append("\n".join(bloco))
 
 
 def _tabela_para_md(table: Any) -> str:
