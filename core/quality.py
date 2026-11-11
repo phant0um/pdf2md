@@ -117,7 +117,7 @@ def corrigir_mojibake(texto: str) -> tuple[str, int]:
     Deve ser chamado ANTES de limpar_artefatos: o mojibake de "í" contém
     U+00AD (soft hyphen), que limpar_artefatos removeria antes da correção.
 
-    Aplica substituições da tabela _MOJIBAKE em sequência. Seguro para
+    Aplica a tabela _MOJIBAKE numa única passada de regex. Seguro para
     documentos em português: os padrões "Ã£", "Ã§" etc. nunca aparecem
     intencionalmente em texto PT-BR correto — são sempre artefatos de encoding.
 

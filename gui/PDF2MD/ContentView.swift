@@ -419,11 +419,8 @@ struct ContentView: View {
             erroColagem = "Nenhuma imagem no clipboard."
             return
         }
-        guard let cachesBase = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
-            erroColagem = "Diretório de cache não encontrado."
-            return
-        }
-        let dir = cachesBase.appendingPathComponent("pdf2md/pastes")
+        // Mesmo diretório que limpar() varre — fonte única em `pasteDir`.
+        let dir = pasteDir
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             // UUID garante unicidade — sem colisão por segundo-granularity

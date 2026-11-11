@@ -10,8 +10,31 @@ Versioning follows [SemVer](https://semver.org/).
 - Pillow 12.3.0 → 13.0.0: 39 advisories (PYSEC-2026-4326 e seguintes) apontadas
   pelo `pip-audit` no CI.
 
+### Changed
+
+- OCR por visão do LLM (fallback do Tesseract com menos de 10 caracteres) só roda
+  com `--llm` ou `--llm-fallback` e usa o mesmo `--llm-url`/`--llm-modelo`. Antes
+  rodava sempre que `PDF2MD_LLM_URL` estava definida, enviando imagens e páginas
+  escaneadas para um provider remoto sem opt-in (privacidade e custo), e ignorava
+  as flags. O alt-text de `--imagens ambos` nunca vai ao LLM.
+
 ### Fixed
 
+- `--workers 0` (ou negativo) derrubava o CLI com traceback do
+  `ThreadPoolExecutor`; agora é erro de uso (`min=1`).
+- CSV com célula entre aspas contendo quebra de linha colava as palavras
+  (`splitlines()` antes do `csv.reader`); CR/CRLF em células de tabela também
+  viram espaço.
+- `--llm`/`--llm-fallback`: resposta cortada em `max_tokens`
+  (`finish_reason: length`) substituía o documento por texto truncado; agora o
+  original é mantido com aviso.
+- `--imagens ambos` com `--obsidian` rodava OCR por imagem e descartava o
+  resultado (wikilink não tem alt-text).
+- GUI (Preferências): a lista de modelos do provider e o botão "Testar" exigiam
+  modelo já escolhido — trocar de provider zerava o modelo e a lista ficava
+  presa na estática.
+- `scripts/build_app.sh` abortava sem venv ativo (`VIRTUAL_ENV: unbound
+  variable`); agora cai no `.venv/` do `uv sync`.
 - `scripts/build_app.sh`: só com Command Line Tools, o SDK padrão (MacOSX27.2) não
   compila SwiftUI (plugin `SwiftUIMacros` ausente) e o build falhava no passo 2,
   depois do PyInstaller. Uma sonda escolhe o SDK (`PDF2MD_SDK`, padrão, versionados)
