@@ -20,6 +20,7 @@ Versioning follows [SemVer](https://semver.org/).
 
 ### Fixed
 
+- GUI: o toggle "Melhorar com IA" ficava ligado (e desabilitado) quando a configuração do LLM deixava de ser válida, e a conversão mandava --llm-fallback com config incompleta; agora ele desliga e a chamada só passa a flag com config válida.
 - `--workers 0` (ou negativo) derrubava o CLI com traceback do
   `ThreadPoolExecutor`; agora é erro de uso (`min=1`).
 - CSV com célula entre aspas contendo quebra de linha colava as palavras

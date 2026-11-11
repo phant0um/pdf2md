@@ -126,6 +126,10 @@ struct ContentView: View {
                             }
                         }
                         .disabled(processador.estaProcessando || !llmConfigurado)
+                        .onChange(of: llmConfigurado) { configurado in
+                            // Config ficou incompleta: desliga o toggle em vez de deixá-lo ligado e desabilitado
+                            if !configurado { modoLLM = false }
+                        }
 
                         if !llmConfigurado {
                             Button("Abrir Preferências…") {
@@ -491,7 +495,8 @@ struct ContentView: View {
                 destino: modoObsidian ? nil : destino,
                 vault: modoObsidian ? destino : nil,
                 obsidian: modoObsidian,
-                llmFallback: modoLLM,
+                // defesa: nunca manda --llm-fallback com config incompleta
+                llmFallback: modoLLM && llmConfigurado,
                 llmURL: LLMProvider.urlResolvida(
                     providerRaw: llmProviderRaw,
                     urlPersonalizada: llmUrlPersonalizada
