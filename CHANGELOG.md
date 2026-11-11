@@ -12,14 +12,6 @@ Versioning follows [SemVer](https://semver.org/).
   duas vezes. Em PR, push novo cancela o run anterior do mesmo PR; em `main` cada
   commit roda (grupo de concorrência por SHA). Flags do PyInstaller numa fonte única, `scripts/pyinstaller_cli.sh`,
   usada pelo CI e pelo `build_app.sh`.
-
-### Security
-
-- Pillow 12.3.0 → 13.0.0: 39 advisories (PYSEC-2026-4326 e seguintes) apontadas
-  pelo `pip-audit` no CI.
-
-### Changed
-
 - GUI converte a lista inteira em um único processo (workers paralelos, dedup
   de mesmo stem como `a.md` / `a-docx.md`), com progresso emitido por arquivo
   durante a execução. Antes, um processo por arquivo, em sequência. CLI aceita
@@ -66,8 +58,6 @@ Versioning follows [SemVer](https://semver.org/).
 - `--llm`/`--llm-fallback`: resposta cortada em `max_tokens`
   (`finish_reason: length`) substituía o documento por texto truncado; agora o
   original é mantido com aviso.
-- `--imagens ambos` com `--obsidian` rodava OCR por imagem e descartava o
-  resultado (wikilink não tem alt-text).
 - GUI (Preferências): a lista de modelos do provider e o botão "Testar" exigiam
   modelo já escolhido — trocar de provider zerava o modelo e a lista ficava
   presa na estática.
@@ -80,6 +70,11 @@ Versioning follows [SemVer](https://semver.org/).
 - PPTX com caixa de texto comum (Inserir > Caixa de Texto) falhava inteiro com
   `ValueError: shape is not a placeholder`. Texto dentro de grupos e notas do
   orador agora entram no Markdown.
+
+### Security
+
+- Pillow 12.3.0 → 13.0.0: 39 advisories (PYSEC-2026-4326 e seguintes) apontadas
+  pelo `pip-audit` no CI.
 
 ## [0.6.1] — 2026-11-07
 
