@@ -10,6 +10,13 @@ Versioning follows [SemVer](https://semver.org/).
 - Pillow 12.3.0 → 13.0.0: 39 advisories (PYSEC-2026-4326 e seguintes) apontadas
   pelo `pip-audit` no CI.
 
+### Fixed
+
+- `scripts/build_app.sh`: só com Command Line Tools, o SDK padrão (MacOSX27.2) não
+  compila SwiftUI (plugin `SwiftUIMacros` ausente) e o build falhava no passo 2,
+  depois do PyInstaller. Uma sonda escolhe o SDK (`PDF2MD_SDK`, padrão, versionados)
+  e falha cedo.
+
 ## [0.6.1] — 2026-11-07
 
 ### Added
