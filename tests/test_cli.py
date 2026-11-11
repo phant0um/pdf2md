@@ -93,6 +93,53 @@ def test_requer_ocr_diretorio_somente_docx(tmp_path):
     assert _requer_ocr(tmp_path) is False
 
 
+def test_requer_ocr_docx_com_ambos(tmp_path):
+    """DOCX com --imagens ambos exige OCR; com transcrever/extrair não."""
+    from core.cli import _requer_ocr
+    arq = tmp_path / "documento.docx"
+    arq.write_text("dummy")
+    assert _requer_ocr(arq, ModoImagem.ambos) is True
+    assert _requer_ocr(arq, ModoImagem.transcrever) is False
+    assert _requer_ocr(arq, ModoImagem.extrair) is False
+
+
+def test_requer_ocr_diretorio_e_lista_docx_com_ambos(tmp_path):
+    """Diretório e lista (stdin) só com DOCX exigem OCR em modo ambos."""
+    from core.cli import _requer_ocr
+    (tmp_path / "arquivo.docx").write_text("dummy")
+    assert _requer_ocr(tmp_path, ModoImagem.ambos) is True
+    assert _requer_ocr([tmp_path / "arquivo.docx"], ModoImagem.ambos) is True
+
+
+def test_cli_docx_ambos_sem_tesseract_bloqueia(tmp_path):
+    """docx + --imagens ambos sem Tesseract: erro de Tesseract, exit 1."""
+    origem = tmp_path / "documento.docx"
+    origem.write_text("dummy")
+
+    with patch("core.image_converter.verificar_tesseract", return_value=False):
+        result = runner.invoke(app, [
+            "converter", str(origem), str(tmp_path), "--imagens", "ambos",
+        ])
+
+    assert result.exit_code == 1
+    assert "Tesseract" in _sem_ansi(result.output)
+
+
+def test_cli_docx_sem_ambos_nao_bloqueia_sem_tesseract(tmp_path):
+    """docx sem --imagens ambos continua sem exigir Tesseract."""
+    origem = tmp_path / "documento.docx"
+    origem.write_text("dummy")
+
+    with (
+        patch("core.image_converter.verificar_tesseract", return_value=False),
+        patch("core.batch.batch_convert", return_value=[]),
+        patch("core.cli.Progress"),
+    ):
+        result = runner.invoke(app, ["converter", str(origem), str(tmp_path)])
+
+    assert "Tesseract" not in _sem_ansi(result.output)
+
+
 # ── Flags LLM (T8): propagação flag > env > default ─────────────────────────
 
 def test_cli_converter_flags_llm_propagadas(tmp_path):

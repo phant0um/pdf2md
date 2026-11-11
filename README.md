@@ -136,7 +136,7 @@ pdf2md llm testar --json     # → {"ok":true,"latencia_ms":42}
 |------|----------|
 | `transcrever` (default) | Current behavior — byte-identical output, OCR for scanned pages |
 | `extrair` | Saves images as files in `<stem>_assets/` next to the MD and links `![](...)`. Scanned pages persist the 300dpi render as `pNNN_full.png` |
-| `ambos` | `extrair` + OCR of each image as the link's alt-text |
+| `ambos` | `extrair` + OCR of each image as the link's alt-text. With `--obsidian` the OCR goes into the embed as `![[img.png|text]]`. DOCX also needs Tesseract in this mode |
 | `ignorar` | Discards images without OCR |
 
 - With `--obsidian`, assets go to `vault/attachments/` and links become wikilinks `![[...]]`.

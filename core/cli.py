@@ -231,14 +231,19 @@ def _silenciar_stdout_nativo() -> Iterator[int]:
         os.close(fd_salvo)
 
 
-def _requer_ocr(origem: Path | list[Path]) -> bool:
+def _requer_ocr(
+    origem: Path | list[Path], imagens: ModoImagem = ModoImagem.transcrever,
+) -> bool:
     """
     True se a entrada pode exigir OCR (imagens ou PDFs).
     Documentos Word (.doc/.docx) usam mammoth/textutil e dispensam Tesseract,
-    então uma conversão só de Word não deve ser bloqueada por Tesseract ausente.
+    exceto .docx com `--imagens ambos`: lá cada imagem recebe OCR como alt-text.
+    .doc não entra: o caminho textutil não extrai imagens.
     Lista (entrada `-`): basta um arquivo com extensão de OCR.
     """
     ocr_exts = EXTENSOES_IMAGEM | EXTENSOES_PDF
+    if imagens == ModoImagem.ambos:
+        ocr_exts = ocr_exts | {".docx"}
     if isinstance(origem, list):
         return any(p.is_file() and p.suffix.lower() in ocr_exts for p in origem)
     if origem.is_file():
@@ -330,8 +335,9 @@ def converter(
         raise typer.Exit(code=1) from exc
 
     # Verifica Tesseract apenas se a entrada puder exigir OCR.
-    # (.docx/.doc usam mammoth/textutil e não dependem de Tesseract.)
-    if _requer_ocr(entrada) and not verificar_tesseract():
+    # (.doc usa textutil e .docx usa mammoth; nenhum dos dois exige Tesseract,
+    # exceto .docx com `--imagens ambos`, que faz OCR de cada imagem.)
+    if _requer_ocr(entrada, imagens) and not verificar_tesseract():
         msg = (
             "[red]Tesseract não encontrado. "
             "Instale: brew install tesseract tesseract-lang[/red]"

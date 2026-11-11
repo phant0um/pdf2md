@@ -51,6 +51,13 @@ Versioning follows [SemVer](https://semver.org/).
   inválida (colunas extras sumiam) e linha em branco virava `|  |`; agora toda
   linha tem a mesma largura e colunas vazias à direita saem.
 - GUI: o toggle "Melhorar com IA" ficava ligado (e desabilitado) quando a configuração do LLM deixava de ser válida, e a conversão mandava --llm-fallback com config incompleta; agora ele desliga e a chamada só passa a flag com config válida. Trocar só a chave nas Preferências (salvar ou apagar) também desliga o toggle.
+- `--imagens ambos` com `--obsidian` agora faz OCR das imagens embutidas: o
+  texto vai como alias do embed (`![[img.png|texto]]`). Antes o wikilink saía
+  sem alt e o OCR era pulado. Colchetes no texto do OCR não quebram mais o
+  link (viram espaço no alt).
+- `.docx` com `--imagens ambos` passa a exigir Tesseract, como PDF. Antes a
+  conversão rodava sem Tesseract e gravava "imagem" como alt-text em todas as
+  imagens, sem aviso.
 - `--workers 0` (ou negativo) derrubava o CLI com traceback do
   `ThreadPoolExecutor`; agora é erro de uso (`min=1`).
 - CSV com célula entre aspas contendo quebra de linha colava as palavras
