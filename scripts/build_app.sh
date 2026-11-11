@@ -94,29 +94,9 @@ if [[ "$(cd -P "${SWIFT_SDK}" && pwd -P)" != "$(cd -P "${SDK_PADRAO}" && pwd -P)
 fi
 
 # ── 1. PyInstaller: binário Python one-file ─────────────────────────────────
-# pymupdf precisa dos resources de layout embarcados (senão FileNotFoundError
-# em runtime no binário congelado).
-PYMUPDF_RES="$("${PYTHON_BIN}" -c "import pymupdf, os; print(os.path.join(os.path.dirname(pymupdf.__file__), 'layout', 'resources'))")"
-if [[ ! -d "${PYMUPDF_RES}" ]]; then
-    echo "✗ resources do pymupdf não encontrados: ${PYMUPDF_RES}" >&2
-    exit 1
-fi
-
+# Flags em scripts/pyinstaller_cli.sh (fonte única, compartilhada com o CI).
 echo "▶ [1/5] PyInstaller → dist/pdf2md"
-"${PYTHON_BIN}" -m PyInstaller core/cli.py \
-    --onefile \
-    --name pdf2md \
-    --add-data "${PYMUPDF_RES}:pymupdf/layout/resources" \
-    --collect-submodules pymupdf4llm \
-    --collect-submodules mammoth \
-    --hidden-import pillow_heif \
-    --distpath "${DIST}" \
-    --workpath "${BUILD}/pyinstaller" \
-    --specpath "${BUILD}" \
-    --noconfirm \
-    --clean
-
-[[ -f "${DIST}/pdf2md" ]] || { echo "✗ binário pdf2md não gerado" >&2; exit 1; }
+PYTHON_BIN="${PYTHON_BIN}" "${RAIZ}/scripts/pyinstaller_cli.sh" "${DIST}" "${BUILD}"
 
 # ── 2. swiftc: executável da GUI ────────────────────────────────────────────
 echo "▶ [2/5] swiftc → PDF2MD (executável SwiftUI)"

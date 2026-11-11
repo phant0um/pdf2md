@@ -1,10 +1,16 @@
 name: CI
 
+# push só em main; pull_request sem filtro de base (PRs empilhados também rodam).
+# Antes, cada push em branch com PR rodava o workflow duas vezes.
 on:
   push:
-    branches: ["**"]
-  pull_request:
     branches: [main]
+  pull_request:
+
+# Push novo no mesmo PR cancela o run anterior; em main cada push roda inteiro.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # FIX 3: escopo mínimo do GITHUB_TOKEN — leitura de conteúdo apenas.
 permissions:
@@ -119,16 +125,7 @@ jobs:
           EOF
 
       - name: Empacotar (PyInstaller one-file)
-        run: |
-          PYMUPDF_RES="$(uv run python -c "import pymupdf, os; print(os.path.join(os.path.dirname(pymupdf.__file__), 'layout', 'resources'))")"
-          uv run pyinstaller core/cli.py \
-            --onefile --name pdf2md \
-            --add-data "${PYMUPDF_RES}:pymupdf/layout/resources" \
-            --collect-submodules pymupdf4llm \
-            --collect-submodules mammoth \
-            --hidden-import pillow_heif \
-            --distpath dist --workpath build/pyinstaller --specpath build \
-            --noconfirm --clean
+        run: uv run bash scripts/pyinstaller_cli.sh dist build
 
       - name: Smoke — args EXATOS da GUI (sem subcomando)
         run: |
