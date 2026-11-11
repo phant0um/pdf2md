@@ -132,3 +132,83 @@ def test_tabela_para_md_pipe_em_celula(pptx_com_tabela):
 
     md = _tabela_para_md(table)
     assert "A\\|B" in md
+
+
+# ── Caixas de texto, grupos e notas do orador ───────────────────────────────
+
+def test_pptx_caixa_de_texto_nao_placeholder(tmp_path):
+    """Caixa de texto comum (não placeholder) não derruba a conversão; título continua ###."""
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])  # só título
+    slide.shapes.title.text = "Titulo"
+    caixa = slide.shapes.add_textbox(Inches(1), Inches(2), Inches(3), Inches(1))
+    caixa.text_frame.text = "Texto na caixa solta"
+    path = tmp_path / "caixa.pptx"
+    prs.save(str(path))
+
+    md = pptx_to_md(path)
+    assert "Texto na caixa solta" in md
+    assert "### Titulo" in md
+
+
+def test_pptx_texto_dentro_de_grupo(tmp_path):
+    """Texto de caixa dentro de grupo entra no Markdown."""
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    grupo = slide.shapes.add_group_shape()
+    caixa = grupo.shapes.add_textbox(Inches(1), Inches(2), Inches(3), Inches(1))
+    caixa.text_frame.text = "Texto do grupo"
+    path = tmp_path / "grupo.pptx"
+    prs.save(str(path))
+
+    assert "Texto do grupo" in pptx_to_md(path)
+
+
+def test_pptx_grupo_aninhado(tmp_path):
+    """Grupo dentro de grupo: texto do nível mais interno entra no Markdown."""
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    externo = slide.shapes.add_group_shape()
+    interno = externo.shapes.add_group_shape()
+    caixa = interno.shapes.add_textbox(Inches(1), Inches(2), Inches(3), Inches(1))
+    caixa.text_frame.text = "Texto aninhado"
+    path = tmp_path / "aninhado.pptx"
+    prs.save(str(path))
+
+    assert "Texto aninhado" in pptx_to_md(path)
+
+
+def test_pptx_notas_do_orador(tmp_path):
+    """Notas com duas linhas viram bloco de citação após o corpo do slide, antes do próximo slide."""
+    prs = Presentation()
+    layout = prs.slide_layouts[1]
+    slide1 = prs.slides.add_slide(layout)
+    slide1.shapes.title.text = "Slide Um"
+    slide1.placeholders[1].text = "Corpo um."
+    slide1.notes_slide.notes_text_frame.text = "Primeira nota\nSegunda nota"
+    slide2 = prs.slides.add_slide(layout)
+    slide2.shapes.title.text = "Slide Dois"
+    path = tmp_path / "notas.pptx"
+    prs.save(str(path))
+
+    md = pptx_to_md(path)
+    bloco = "> **Notas do orador**\n> Primeira nota\n> Segunda nota"
+    assert bloco in md
+    assert md.index("Corpo um.") < md.index(bloco) < md.index("## Slide 2")
+
+
+def test_pptx_sem_notas_sem_bloco(pptx_basico):
+    """Apresentação sem notas não ganha bloco de notas."""
+    assert "Notas do orador" not in pptx_to_md(pptx_basico)
+
+
+def test_pptx_notas_vazias_sem_bloco(tmp_path):
+    """Slide com notas criadas mas vazias não ganha bloco de notas."""
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    notas = slide.notes_slide  # cria a notes slide sem texto
+    assert notas is not None
+    path = tmp_path / "notas_vazias.pptx"
+    prs.save(str(path))
+
+    assert "Notas do orador" not in pptx_to_md(path)

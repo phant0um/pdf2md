@@ -5,6 +5,12 @@ Versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- PPTX com caixa de texto comum (Inserir > Caixa de Texto) falhava inteiro com
+  `ValueError: shape is not a placeholder`. Texto dentro de grupos e notas do
+  orador agora entram no Markdown.
+
 ## [0.6.1] — 2026-11-07
 
 ### Added
