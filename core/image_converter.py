@@ -5,11 +5,15 @@ Pipeline: carrega imagem → pré-processa → OCR → retorna texto como MD.
 """
 from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PIL import Image
 from pillow_heif import register_heif_opener
 
 from core.utils import EXTENSOES_IMAGEM, _validar_existencia, _validar_extensao  # fonte única
+
+if TYPE_CHECKING:
+    from core.llm_enhancer import ConfigLLM
 
 register_heif_opener()
 
@@ -67,7 +71,7 @@ def verificar_tesseract() -> bool:
         return False
 
 
-def image_to_md(path: Path) -> str:
+def image_to_md(path: Path, visao: "ConfigLLM | None" = None) -> str:
     """
     Converte arquivo de imagem em string Markdown via OCR.
 
@@ -81,6 +85,9 @@ def image_to_md(path: Path) -> str:
 
     Args:
         path: Caminho para arquivo de imagem. Extensão deve estar em EXTENSOES_IMAGEM.
+        visao: Config do LLM com visão para o fallback de OCR. None (padrão) =
+            nunca chama o LLM; só o Tesseract. Passado só com opt-in explícito
+            (`--llm` / `--llm-fallback`), usando o mesmo `--llm-url`/`--llm-modelo`.
 
     Returns:
         String Markdown com texto extraído. Retorna string vazia se imagem sem texto.
@@ -129,14 +136,15 @@ def image_to_md(path: Path) -> str:
 
     texto = texto.strip()
 
-    # Fallback: se Tesseract retornou texto muito curto e LLM com visão está disponível,
-    # tenta OCR via LLM (útil para fontes incomuns, manuscrito, etc.)
-    if len(texto) < 10:
+    # Fallback: se Tesseract retornou texto muito curto e o usuário optou pelo LLM
+    # com visão (`visao` não é None), tenta OCR via LLM (fontes incomuns, manuscrito).
+    # Sem opt-in o LLM nunca é consultado: imagem/página pode ser dado sensível.
+    if visao is not None and len(texto) < 10:
         from core.llm_enhancer import disponivel as llm_disponivel
         from core.llm_enhancer import ocr_com_visao
 
-        if llm_disponivel():
-            texto_llm, _ = ocr_com_visao(path)
+        if llm_disponivel(visao):
+            texto_llm, _ = ocr_com_visao(path, visao)
             if texto_llm and len(texto_llm) > len(texto):
                 return texto_llm
 
@@ -154,6 +162,7 @@ def ocr_bytes(dados: bytes, extensao: str) -> str:
     normalizados para PNG via Pillow. Qualquer falha retorna "" — o
     alt-text degrada para "imagem", nunca derruba a conversão.
     """
+    # Alt-text nunca vai para o LLM: image_to_md é chamado sem `visao` (opt-in é por página/arquivo).
     import tempfile
 
     try:

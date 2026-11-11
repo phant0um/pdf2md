@@ -6,7 +6,8 @@ import fitz
 import pytest
 from PIL import Image, ImageDraw
 
-from core.batch import StatusArquivo, batch_convert
+from core.batch import StatusArquivo, _processar_arquivo, batch_convert
+from core.llm_enhancer import ConfigLLM
 from core.utils import ModoImagem
 
 
@@ -590,3 +591,76 @@ def test_batch_diretorio_apenas_subpasta_sem_resultados(tmp_path):
     resultados = batch_convert(origem=entrada, destino=tmp_path / "saida", workers=1)
 
     assert resultados == []
+
+
+# ── LLM com visão: opt-in propagado até image_to_md ──────────────────────────
+
+def _espiar_image_to_md(monkeypatch) -> list[object]:
+    """Troca image_to_md (módulo e registry) por espião que guarda o `visao` recebido.
+
+    O registry guarda a referência original: sem trocar a entrada dele, o
+    despacho chamaria o conversor real e o espião nunca seria visto.
+    O pipeline de qualidade é isolado para não consultar LLM de verdade.
+    """
+    import core.batch as batch
+
+    original = batch.image_to_md
+    visoes: list[object] = []
+
+    def espiao(path, visao=None):
+        visoes.append(visao)
+        return "# OCR"
+
+    registry = [
+        (exts, espiao if fn is original else fn) for exts, fn in batch._CONVERSORES
+    ]
+    monkeypatch.setattr(batch, "image_to_md", espiao)
+    monkeypatch.setattr(batch, "_CONVERSORES", registry)
+    monkeypatch.setattr(batch, "aplicar_pipeline_qualidade", lambda md, *a, **k: (md, []))
+    return visoes
+
+
+def _png_branco(tmp_path: Path) -> Path:
+    path = tmp_path / "scan.png"
+    Image.new("RGB", (50, 50), color="white").save(path)
+    return path
+
+
+def test_processar_imagem_llm_fallback_passa_config(tmp_path, monkeypatch):
+    """llm_fallback=True sem llm_config → image_to_md recebe ConfigLLM padrão."""
+    visoes = _espiar_image_to_md(monkeypatch)
+
+    res = _processar_arquivo(
+        str(_png_branco(tmp_path)), str(tmp_path / "saida.md"), False, True,
+        llm_fallback=True,
+    )
+
+    assert res["status"] == StatusArquivo.CONCLUIDO.value
+    assert len(visoes) == 1
+    assert isinstance(visoes[0], ConfigLLM)
+
+
+def test_processar_imagem_sem_flags_visao_none(tmp_path, monkeypatch):
+    """Sem --llm/--llm-fallback → image_to_md recebe visao=None (LLM nunca chamado)."""
+    visoes = _espiar_image_to_md(monkeypatch)
+
+    res = _processar_arquivo(
+        str(_png_branco(tmp_path)), str(tmp_path / "saida.md"), False, True,
+    )
+
+    assert res["status"] == StatusArquivo.CONCLUIDO.value
+    assert visoes == [None]
+
+
+def test_processar_imagem_llm_config_mesmo_objeto(tmp_path, monkeypatch):
+    """usar_llm=True + llm_config → o mesmo objeto de config chega a image_to_md."""
+    visoes = _espiar_image_to_md(monkeypatch)
+    cfg = ConfigLLM(url="http://x:1/v1", modelo="m")
+
+    res = _processar_arquivo(
+        str(_png_branco(tmp_path)), str(tmp_path / "saida.md"), False, True,
+        usar_llm=True, llm_config=cfg,
+    )
+
+    assert res["status"] == StatusArquivo.CONCLUIDO.value
+    assert visoes[0] is cfg

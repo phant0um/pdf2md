@@ -105,6 +105,8 @@ pdf2md docs/ output/ --llm-fallback --llm-url https://api.groq.com/openai/v1 --l
 # LLM always (regardless of quality)
 pdf2md docs/ output/ --llm
 
+# Vision OCR fallback (Tesseract < 10 chars → LLM vision) runs only with --llm or --llm-fallback, using the same --llm-url/--llm-modelo; alt-text OCR never goes to the LLM
+
 # Ignore page headers and footers (5% of page height from top and bottom)
 pdf2md document.pdf output/ --ignorar-margens 5
 

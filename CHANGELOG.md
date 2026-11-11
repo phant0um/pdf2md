@@ -5,6 +5,14 @@ Versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- OCR por visão do LLM (fallback do Tesseract com menos de 10 caracteres) só roda
+  com `--llm` ou `--llm-fallback` e usa o mesmo `--llm-url`/`--llm-modelo`. Antes
+  rodava sempre que `PDF2MD_LLM_URL` estava definida, enviando imagens e páginas
+  escaneadas para um provider remoto sem opt-in (privacidade e custo), e ignorava
+  as flags. O alt-text de `--imagens ambos` nunca vai ao LLM.
+
 ### Fixed
 
 - `--workers 0` (ou negativo) derrubava o CLI com traceback do

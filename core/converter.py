@@ -7,7 +7,7 @@ import importlib.util
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import fitz  # PyMuPDF
 import pymupdf4llm
@@ -26,6 +26,9 @@ from core.utils import (
     ModoImagem,
     _validar_existencia,
 )
+
+if TYPE_CHECKING:
+    from core.llm_enhancer import ConfigLLM
 
 # Mínimo de caracteres para considerar que uma página tem texto nativo suficiente.
 # Abaixo disso, a página é tratada como imagem e passa por OCR.
@@ -62,6 +65,7 @@ def pdf_to_md(
     wikilinks: bool = False,
     prefixo_nome: str = "",
     avisos: list[str] | None = None,
+    visao: "ConfigLLM | None" = None,
 ) -> str:
     """
     Converte um arquivo PDF em string Markdown.
@@ -88,6 +92,8 @@ def pdf_to_md(
             Obsidian), evitando colisão de `img_p001_0.png` sob ThreadPool.
         avisos: Lista opcional onde avisos de extração são anexados
             (limites excedidos, imagens ilegíveis).
+        visao: Config do LLM com visão para o OCR de páginas-scan. None (padrão)
+            = nunca chama o LLM. Só é passado com opt-in (`--llm`/`--llm-fallback`).
 
     Returns:
         String Markdown com conteúdo extraído.
@@ -130,7 +136,7 @@ def pdf_to_md(
         partes = [
             _marcar_pagina(
                 num,
-                _processar_pagina(doc, num, chunks, ignorar_margens, contexto, bruto),
+                _processar_pagina(doc, num, chunks, ignorar_margens, contexto, bruto, visao),
             )
             for num in range(len(doc))
         ]
@@ -198,6 +204,7 @@ def _processar_pagina(
     ignorar_margens: float,
     contexto: ContextoAssets | None = None,
     bruto: list[str] | None = None,
+    visao: "ConfigLLM | None" = None,
 ) -> str:
     """Extrai conteúdo de uma página: texto nativo (filtrado ou não) ou OCR."""
     pagina = doc.load_page(num_pagina)
@@ -218,7 +225,7 @@ def _processar_pagina(
     # Página-scan (sem texto nativo): OCR do render.
     if contexto is not None and contexto.modo == ModoImagem.ignorar:
         return ""  # modo ignorar: descarta sem OCR (e sem render persistido)
-    return _ocr_pagina(pagina, num_pagina, contexto)
+    return _ocr_pagina(pagina, num_pagina, contexto, visao)
 
 
 def _texto_nativo_pagina(num_pagina: int, chunks: list[dict[str, Any]], texto_bruto: str) -> str:
@@ -256,7 +263,10 @@ def _texto_filtrado_margens(pagina: fitz.Page, margem_pct: float) -> str:
 
 
 def _ocr_pagina(
-    pagina: fitz.Page, num_pagina: int = 0, contexto: ContextoAssets | None = None
+    pagina: fitz.Page,
+    num_pagina: int = 0,
+    contexto: ContextoAssets | None = None,
+    visao: "ConfigLLM | None" = None,
 ) -> str:
     """Renderiza a página como imagem em alta resolução e aplica OCR.
 
@@ -271,7 +281,7 @@ def _ocr_pagina(
         pix.save(str(tmp_path))
 
     try:
-        texto = image_to_md(tmp_path)
+        texto = image_to_md(tmp_path, visao=visao)
     finally:
         tmp_path.unlink(missing_ok=True)
 

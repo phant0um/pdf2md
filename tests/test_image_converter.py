@@ -5,6 +5,7 @@ import pytest
 from PIL import Image
 
 from core.image_converter import image_to_md
+from core.llm_enhancer import ConfigLLM
 
 
 def test_png_texto_claro(fixture_img_texto, mock_tesseract):
@@ -145,7 +146,7 @@ def test_fallback_ocr_curto_usa_llm_vision(tmp_path, monkeypatch):
         lambda path, config=None: ("# Texto completo do LLM vision", []),
     )
 
-    assert image_to_md(img) == "# Texto completo do LLM vision"
+    assert image_to_md(img, visao=ConfigLLM()) == "# Texto completo do LLM vision"
 
 
 def test_fallback_llm_mais_curto_mantem_ocr(tmp_path, monkeypatch):
@@ -158,7 +159,49 @@ def test_fallback_llm_mais_curto_mantem_ocr(tmp_path, monkeypatch):
     monkeypatch.setattr("core.llm_enhancer.disponivel", lambda *a, **k: True)
     monkeypatch.setattr("core.llm_enhancer.ocr_com_visao", lambda path, config=None: ("xy", []))
 
-    assert image_to_md(img) == "abc"
+    assert image_to_md(img, visao=ConfigLLM()) == "abc"
+
+
+def test_fallback_llm_sem_opt_in_nao_chama_llm(tmp_path, monkeypatch):
+    """OCR curto sem `visao` (sem opt-in) → LLM nunca consultado; vale o Tesseract."""
+    img = tmp_path / "scan.png"
+    Image.new("RGB", (100, 100), color="white").save(img)
+
+    monkeypatch.setattr("pytesseract.image_to_string", lambda image, lang=None, config=None: "curto")
+    monkeypatch.setattr("core.image_converter.verificar_tesseract", lambda: True)
+
+    def nao_deve_chamar(*args, **kwargs):
+        raise AssertionError("LLM não deveria ser consultado sem opt-in (visao=None)")
+
+    monkeypatch.setattr("core.llm_enhancer.disponivel", nao_deve_chamar)
+
+    assert image_to_md(img) == "curto"
+
+
+def test_fallback_llm_recebe_config(tmp_path, monkeypatch):
+    """Com `visao`, o mesmo objeto de config chega a disponivel e a ocr_com_visao."""
+    img = tmp_path / "scan.png"
+    Image.new("RGB", (100, 100), color="white").save(img)
+    cfg = ConfigLLM(url="http://x:1/v1", modelo="m")
+    recebidos: dict[str, object] = {}
+
+    monkeypatch.setattr("pytesseract.image_to_string", lambda image, lang=None, config=None: "curto")
+    monkeypatch.setattr("core.image_converter.verificar_tesseract", lambda: True)
+
+    def disponivel_espiao(config=None):
+        recebidos["disponivel"] = config
+        return True
+
+    def ocr_espiao(path, config=None):
+        recebidos["ocr"] = config
+        return ("# Texto completo do LLM vision", [])
+
+    monkeypatch.setattr("core.llm_enhancer.disponivel", disponivel_espiao)
+    monkeypatch.setattr("core.llm_enhancer.ocr_com_visao", ocr_espiao)
+
+    assert image_to_md(img, visao=cfg) == "# Texto completo do LLM vision"
+    assert recebidos["disponivel"] is cfg
+    assert recebidos["ocr"] is cfg
 
 
 def test_ocr_razoavel_nao_chama_llm(tmp_path, monkeypatch):
@@ -235,6 +278,32 @@ def test_ocr_bytes_gif_normaliza_para_png(tmp_path, mock_tesseract):
     Image.new("RGB", (20, 20), color=(255, 0, 0)).save(gif, format="GIF")
 
     assert ocr_bytes(gif.getvalue(), ".gif") == "Texto OCR mockado"
+
+
+def test_ocr_bytes_nunca_chama_llm(monkeypatch):
+    """Alt-text (ocr_bytes) nunca consulta o LLM, mesmo com OCR curto.
+
+    Espião em vez de raise: ocr_bytes engole exceções (retorna ""), então um
+    raise aqui passaria em silêncio mesmo se o LLM fosse chamado.
+    """
+    from io import BytesIO
+
+    from core.image_converter import ocr_bytes
+
+    buf = BytesIO()
+    Image.new("RGB", (20, 20), color=(255, 0, 0)).save(buf, format="PNG")
+    chamadas: list[tuple[object, ...]] = []
+
+    def disponivel_espiao(*args, **kwargs):
+        chamadas.append(args)
+        return False
+
+    monkeypatch.setattr("pytesseract.image_to_string", lambda image, lang=None, config=None: "curto")
+    monkeypatch.setattr("core.image_converter.verificar_tesseract", lambda: True)
+    monkeypatch.setattr("core.llm_enhancer.disponivel", disponivel_espiao)
+
+    assert ocr_bytes(buf.getvalue(), ".png") == "curto"
+    assert chamadas == []
 
 
 def test_ocr_bytes_corrompido_retorna_vazio(mock_tesseract):
