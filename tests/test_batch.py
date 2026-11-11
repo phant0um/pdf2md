@@ -652,6 +652,24 @@ def test_processar_imagem_sem_flags_visao_none(tmp_path, monkeypatch):
     assert visoes == [None]
 
 
+def test_processar_imagem_config_sem_flags_visao_none(tmp_path, monkeypatch):
+    """llm_config presente mas sem --llm/--llm-fallback → visao=None.
+
+    Vazamento corrigido: antes, a config chegava ao conversor só por existir,
+    e o LLM com visão era chamado sem opt-in explícito.
+    """
+    visoes = _espiar_image_to_md(monkeypatch)
+
+    res = _processar_arquivo(
+        str(_png_branco(tmp_path)), str(tmp_path / "saida.md"), False, True,
+        usar_llm=False, llm_fallback=False,
+        llm_config=ConfigLLM(url="http://x/v1", modelo="m"),
+    )
+
+    assert res["status"] == StatusArquivo.CONCLUIDO.value
+    assert visoes == [None]
+
+
 def test_processar_imagem_llm_config_mesmo_objeto(tmp_path, monkeypatch):
     """usar_llm=True + llm_config → o mesmo objeto de config chega a image_to_md."""
     visoes = _espiar_image_to_md(monkeypatch)

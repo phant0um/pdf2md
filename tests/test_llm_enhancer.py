@@ -643,3 +643,22 @@ def test_melhorar_markdown_resposta_truncada_preserva_original(tmp_path):
 
     assert resultado == "texto original completo"
     assert any("RespostaTruncadaError" in aviso for aviso in avisos)
+
+
+def test_ocr_com_visao_truncado_nao_usa_texto(tmp_path):
+    """finish_reason "length" no OCR com visão → texto vazio + aviso, nunca o parcial.
+
+    Mesmo contrato de melhorar_markdown: a resposta cortada não entra no Markdown.
+    """
+    img = tmp_path / "scan.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 100)
+    corpo = json.dumps({
+        "choices": [{"message": {"content": "texto cort"}, "finish_reason": "length"}]
+    }).encode("utf-8")
+
+    with patch("urllib.request.urlopen", return_value=_mock_resp_bytes(corpo)):
+        resultado, avisos = ocr_com_visao(img)
+
+    assert resultado == ""
+    assert "texto cort" not in resultado
+    assert any("RespostaTruncadaError" in aviso for aviso in avisos)
