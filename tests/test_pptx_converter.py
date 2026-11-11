@@ -212,3 +212,51 @@ def test_pptx_notas_vazias_sem_bloco(tmp_path):
     prs.save(str(path))
 
     assert "Notas do orador" not in pptx_to_md(path)
+
+
+# ── Shapes sem geometria e ordem de grupo ───────────────────────────────────
+
+def _pptx_shape_sem_geometria(tmp_path, texto: str, nome: str):
+    """PPTX com caixa de texto cujo p:sp não tem cNvSpPr nem prstGeom (shape_type indefinido)."""
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])  # em branco
+    caixa = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(2), Inches(1))
+    caixa.text_frame.text = texto
+    sp = caixa._element
+    cnv = sp.xpath(".//p:cNvSpPr")[0]
+    for chave in list(cnv.attrib):
+        del cnv.attrib[chave]
+    for geom in sp.xpath(".//a:prstGeom"):
+        geom.getparent().remove(geom)
+    path = tmp_path / nome
+    prs.save(str(path))
+    return path
+
+
+def test_pptx_shape_sem_geometria_nao_quebra(tmp_path):
+    """Shape sem geometria (shape_type indefinido) não derruba a conversão do arquivo."""
+    path = _pptx_shape_sem_geometria(tmp_path, "", "sem_geom_vazio.pptx")
+    md = pptx_to_md(path)
+    assert "## Slide 1" in md
+
+
+def test_pptx_shape_sem_geometria_com_texto(tmp_path):
+    """Shape sem geometria com texto: o texto entra no Markdown sem exceção."""
+    path = _pptx_shape_sem_geometria(tmp_path, "solto", "sem_geom_texto.pptx")
+    assert "solto" in pptx_to_md(path)
+
+
+def test_pptx_grupo_em_ordem(tmp_path):
+    """Caixas dentro de grupo saem na ordem em que foram inseridas."""
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    grupo = slide.shapes.add_group_shape()
+    primeiro = grupo.shapes.add_textbox(Inches(1), Inches(2), Inches(3), Inches(1))
+    primeiro.text_frame.text = "primeiro"
+    segundo = grupo.shapes.add_textbox(Inches(1), Inches(4), Inches(3), Inches(1))
+    segundo.text_frame.text = "segundo"
+    path = tmp_path / "grupo_ordem.pptx"
+    prs.save(str(path))
+
+    md = pptx_to_md(path)
+    assert md.index("primeiro") < md.index("segundo")

@@ -59,9 +59,10 @@ def pptx_to_md(path: Path) -> str:
 
 def _processar_shape(shape: Any, partes: list[str]) -> None:
     """Extrai conteúdo de um shape (grupo, tabela, título ou corpo) para a lista de partes."""
-    from pptx.enum.shapes import MSO_SHAPE_TYPE  # lazy import, como em pptx_to_md
+    from pptx.shapes.group import GroupShape  # lazy import, como em pptx_to_md
 
-    if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+    # isinstance em vez de shape_type: shape_type levanta em p:sp sem geometria
+    if isinstance(shape, GroupShape):
         for interno in shape.shapes:
             _processar_shape(interno, partes)
         return
