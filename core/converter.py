@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 import fitz  # PyMuPDF
 import pymupdf4llm
 
+from core.glifos_tex import extrair_glifos_tex, reparar_hook_linha
 from core.image_assets import ColetorAssets, ContextoAssets
 from core.image_converter import (
     _configurar_tesseract_cmd,
@@ -141,10 +142,18 @@ def pdf_to_md(
             )
             for num in range(len(doc))
         ]
+        # Glifos TeX (ex.: gancho de quebra de linha) só são lidos se há U+FFFD.
+        glifos = extrair_glifos_tex(doc) if any("�" in p for p in partes) else []
     finally:
         doc.close()
 
     md = "\n\n".join(partes)
+    md, n_hook = reparar_hook_linha(md, glifos)
+    if n_hook and avisos_efetivos is not None:
+        avisos_efetivos.append(
+            f"{n_hook} gancho(s) de quebra de linha TeX reparado(s) como ↪ "
+            f"(glifo sem ToUnicode no PDF de origem)"
+        )
     md, n_reparos = reparar_ligaduras(md, "\n".join(bruto))
     if n_reparos and avisos_efetivos is not None:
         avisos_efetivos.append(

@@ -414,3 +414,23 @@ def test_pipeline_repassa_config_llm(tmp_path):
 
     assert len(recebidos) == 2
     assert all(c is config for _, c in recebidos)
+
+
+# ── classificar_fffd: vizinho de fórmula não é palavra corrompida ────────────
+
+def test_classificar_fffd_vizinho_subscrito_e_simbolo():
+    """U+FFFD entre marcação de fórmula ou dígito conta como símbolo."""
+    from core.quality import classificar_fffd
+    assert classificar_fffd("proj��2[") == (0, 2)
+
+
+def test_classificar_fffd_palavra_real_continua_palavra():
+    """Corrupção de palavra (letra colada) continua contando como palavra."""
+    from core.quality import classificar_fffd
+    assert classificar_fffd("Work�ow") == (1, 0)
+
+
+def test_classificar_fffd_sublinhado_vizinho_nao_e_marcacao():
+    """`_` ao lado de letra não torna corrupção de itálico em símbolo."""
+    from core.quality import classificar_fffd
+    assert classificar_fffd("_�ow_") == (1, 0)
