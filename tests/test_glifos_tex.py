@@ -242,3 +242,55 @@ def test_extrair_mesma_linha_com_split_diferente_entre_vistas_pareia():
         [[_span("LMMathItalic6-Regular", [","]), _span("cmr10", ["→"])]],
     )
     assert extrair_glifos_tex([pagina]) == [("LMMathItalic6-Regular", 0x2C, "→")]
+
+
+# --- Formas `_�_ →` e `→ _�_`: gancho e seta em fontes diferentes ---
+
+
+def test_reparar_hook_forma_italico_seta_depois_com_prova_troca():
+    """`_�_ →` (gancho em itálico, seta de outra fonte) vira ↪ quando há prova."""
+    md, n = reparar_hook_linha("Seja f: A _�_ → B uma inclusao.", [_HOOK])
+    assert md == "Seja f: A ↪ B uma inclusao."
+    assert n == 1
+
+
+def test_reparar_hook_forma_seta_antes_com_prova_troca():
+    """`→ _�_` (seta antes do gancho, linha só com os dois glifos) vira ↪ com prova."""
+    md, n = reparar_hook_linha("→ _�_ ", [_HOOK])
+    assert md == "↪ "
+    assert n == 1
+
+
+def test_reparar_hook_forma_nova_sem_prova_nao_troca():
+    """`_�_ →` sem gancho comprovado fica intacto: sem prova, nada é trocado."""
+    original = "A _�_ → B"
+    md, n = reparar_hook_linha(original, [_SOMA])
+    assert md == original
+    assert n == 0
+
+
+def test_reparar_hook_forma_nova_com_gancho_sem_seta_nao_troca():
+    """Gancho sem → na mesma linha não prova `_�_ →` nem `→ _�_`."""
+    original = "→ _�_ e A _�_ → B"
+    md, n = reparar_hook_linha(original, [_HOOK_SEM_SETA])
+    assert md == original
+    assert n == 0
+
+
+def test_reparar_hook_mistura_mais_padroes_que_provas_nao_troca_nenhum():
+    """Negativo plantado: três formas juntas, duas provas. Nenhum é trocado.
+
+    Motivo: somar as três formas tem de contar, senão a forma nova escaparia
+    da regra "mais padrões que provas" e trocaria um padrão sem prova.
+    """
+    original = "�→ a _�_ → b → _�_ c"
+    md, n = reparar_hook_linha(original, [_HOOK, _HOOK])
+    assert md == original
+    assert n == 0
+
+
+def test_reparar_hook_mistura_com_provas_suficientes_troca_todas_as_formas():
+    """Três formas e três provas: todas viram ↪, e o total é 3."""
+    md, n = reparar_hook_linha("�→ a _�_ → b → _�_ c", [_HOOK, _HOOK, _HOOK])
+    assert md == "↪ a ↪ b ↪ c"
+    assert n == 3

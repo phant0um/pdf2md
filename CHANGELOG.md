@@ -31,6 +31,7 @@ Versioning follows [SemVer](https://semver.org/).
 
 ### Fixed
 
+- Gancho TeX com seta de outra fonte (CMSY10) sai `A _�_ → B` ou `→ _�_` e agora vira `↪` sem itálico; antes ficava `�` no Markdown. Reparo conta as três formas com a mesma prova por ocorrência.
 - Hook `�→` (glifo TeX de quebra de linha): a prova exige a seta logo depois do glifo; o pareamento entre as duas extrações agora é por linha, então sobrevive a spans divididos de forma diferente. Teste com PDF real.
 - Reparo de `↪` (quebra de linha TeX) precisa de um glifo comprovado por ocorrência de `�→`; com mais padrões que provas nada é trocado, antes um só glifo trocava todos.
 - Glifo `↪` (quebra de linha em listagens TeX) sem ToUnicode agora é reparado em vez
