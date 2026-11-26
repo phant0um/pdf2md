@@ -7,9 +7,10 @@ mesmo caractere volta como o código bruto da fonte. Pareando as duas extraçõe
 por span (mesmo número de chars) sabemos (fonte, código) de cada U+FFFD.
 
 Regra única aceita: o glifo de gancho de quebra de linha (fonte LMMathItalic,
-código 0x2C = \\lhook) sempre vem antes de → (U+2192) e junto formam ↪. Só
-substituímos `�→` quando o próprio documento contém esse glifo — sem prova
-no documento, nada é trocado.
+código 0x2C = \\lhook) sempre vem antes de → (U+2192) e junto formam ↪. A prova
+é por ocorrência: cada `�→` precisa de um glifo de gancho extraído. Se há
+mais padrões `�→` que provas, não sabemos quais são gancho e nada é trocado
+(desde 2026-11-26; antes bastava uma prova para trocar todos).
 """
 from typing import Any
 
@@ -79,18 +80,32 @@ def tem_glifo_hook(glifos: list[tuple[str, int]]) -> bool:
     Returns:
         True se há ao menos um (LMMathItalic*, 0x2C).
     """
-    return any(
-        fonte.startswith(_PREFIXO_FONTE_HOOK) and codigo == _CODIGO_HOOK
+    return _conta_hooks(glifos) > 0
+
+
+def _conta_hooks(glifos: list[tuple[str, int]]) -> int:
+    """
+    Conta as ocorrências de (LMMathItalic*, 0x2C) — uma por prova de gancho.
+
+    Contar (e não só detectar) é o que permite comparar com o número de `�→`.
+    """
+    return sum(
+        1
         for fonte, codigo in glifos
+        if fonte.startswith(_PREFIXO_FONTE_HOOK) and codigo == _CODIGO_HOOK
     )
 
 
 def reparar_hook_linha(md: str, glifos: list[tuple[str, int]]) -> tuple[str, int]:
     """
-    Troca `�→` por ↪ quando o documento tem o glifo de gancho comprovado.
+    Troca `�→` por ↪ só quando há uma prova de gancho para cada ocorrência.
 
-    Sem o glifo comprovado no documento, devolve o texto intacto — o U+FFFD
-    seguido de seta pode ter outra origem e não é trocado às cegas.
+    Prova por documento não basta: um único \\lhook faria todo `�→` virar ↪,
+    inclusive os de outras fontes. Então comparamos contagens:
+    - sem padrão `�→` ou sem gancho comprovado: texto intacto, 0;
+    - padrões <= provas: todos viram ↪, devolve o número de padrões;
+    - padrões > provas: nenhum é trocado, devolve (md, 0). Não dá para saber
+      quais são gancho, e a regra do módulo é "sem prova, nada é trocado".
 
     Args:
         md: Markdown com possíveis U+FFFD.
@@ -99,8 +114,11 @@ def reparar_hook_linha(md: str, glifos: list[tuple[str, int]]) -> tuple[str, int
     Returns:
         (md_reparado, n_substituicoes)
     """
-    if not tem_glifo_hook(glifos):
-        return md, 0
     padrao = "�" + _SETA
-    n = md.count(padrao)
-    return md.replace(padrao, _HOOK_LINHA), n
+    n_padrao = md.count(padrao)
+    n_hook = _conta_hooks(glifos)
+    if n_padrao == 0 or n_hook == 0:
+        return md, 0
+    if n_padrao > n_hook:
+        return md, 0
+    return md.replace(padrao, _HOOK_LINHA), n_padrao
