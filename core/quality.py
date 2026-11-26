@@ -93,6 +93,13 @@ _LETRA_TEXTO = "[^\\W\\d_\u0370-\u03ff\U0001d400-\U0001d7ff]"
 _RUN_FFFD_RE = re.compile(r"(.?)(\ufffd+)(?=(.?))", re.DOTALL)
 _LETRA_TEXTO_RE = re.compile(_LETRA_TEXTO)
 
+# Marcação de fórmula: dígito, colchete e potência. Vizinho desses indica glifo
+# matemático sem ToUnicode, não letra de palavra.
+# `( ) { } |` ficam de fora de propósito: vêm antes de palavra comum (parêntese
+# "(figure", célula de tabela "|field|"), e contá-los escondia ligadura quebrada.
+# `_` também fica de fora: sublinhado de itálico corrompido não é marcação.
+_MARCACAO_FORMULA_RE = re.compile(r"[\d\[\]^]")
+
 # Extrai palavras do texto de referência para montar o dicionário do documento.
 _PALAVRA_RE = re.compile(r"[^\W_]+")
 
@@ -244,8 +251,12 @@ def classificar_fffd(md: str) -> tuple[int, int]:
     (Σ, =) — o texto ao redor está íntegro e o reparo de ligaduras não tem
     referência para eles. Avisar "texto corrompido" nesse caso é falso alarme.
 
-    Regra: um run de U+FFFD colado (à esquerda ou à direita) em letra de
-    texto corrido conta como palavra corrompida; o resto conta como símbolo.
+    Regra: um run de U+FFFD é palavra quando um lado é letra de texto corrido
+    e o lado oposto NÃO é dígito nem marcação de fórmula (só `[ ] ^` e dígito).
+    Qualquer outro caso é símbolo. Ex.: `proj��2[` é símbolo (dígito e colchete);
+    `_�ow_` é palavra (o `_` do outro lado não conta como marcação).
+    `( ) { } |` ficam fora da marcação porque precedem palavra comum (parêntese,
+    célula de tabela): `(�gure` e `|�eld|` são ligadura quebrada, não símbolo.
     Letras gregas e alfanuméricos matemáticos (𝐽, 𝑗) NÃO são letra de texto.
 
     Args:
@@ -257,8 +268,15 @@ def classificar_fffd(md: str) -> tuple[int, int]:
     n_palavra = n_simbolo = 0
     for m in _RUN_FFFD_RE.finditer(md):
         run = len(m.group(2))
-        vizinhos = m.group(1) + m.group(3)
-        if _LETRA_TEXTO_RE.search(vizinhos):
+        esq, dir_ = m.group(1), m.group(3)
+        # Letra de texto de um lado com o oposto sem dígito nem marcação de
+        # fórmula (ex.: norma `proj‖2[` tem dígito do lado, então é símbolo).
+        palavra = (
+            bool(_LETRA_TEXTO_RE.search(esq)) and not _MARCACAO_FORMULA_RE.search(dir_)
+        ) or (
+            bool(_LETRA_TEXTO_RE.search(dir_)) and not _MARCACAO_FORMULA_RE.search(esq)
+        )
+        if palavra:
             n_palavra += run
         else:
             n_simbolo += run

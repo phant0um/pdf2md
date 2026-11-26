@@ -31,6 +31,10 @@ Versioning follows [SemVer](https://semver.org/).
 
 ### Fixed
 
+- Glifo `↪` (quebra de linha em listagens TeX) sem ToUnicode agora é reparado em vez
+  de virar U+FFFD.
+- U+FFFD vizinho de fórmula ou dígito não é mais contado como texto corrompido;
+  corrupção de palavra ao lado de `_` (itálico) continua sendo detectada.
 - A troca do home por `~` não respeitava o fim do segmento (home `/Users/al`
   transformava `/Users/alice/x.pdf` em `~ice/x.pdf`); home `/` agora é ignorado.
   `.`, `,` e `;` só fecham o segmento antes de espaço ou fim
