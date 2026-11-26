@@ -31,6 +31,7 @@ Versioning follows [SemVer](https://semver.org/).
 
 ### Fixed
 
+- Reparo de `↪` (quebra de linha TeX) precisa de um glifo comprovado por ocorrência de `�→`; com mais padrões que provas nada é trocado, antes um só glifo trocava todos.
 - Glifo `↪` (quebra de linha em listagens TeX) sem ToUnicode agora é reparado em vez
   de virar U+FFFD.
 - U+FFFD vizinho de fórmula ou dígito não é mais contado como texto corrompido;
