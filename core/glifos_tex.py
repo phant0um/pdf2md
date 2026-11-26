@@ -14,7 +14,16 @@ ocorrência: cada `�→` precisa de um gancho comprovado. Gancho comprovado é
 vir em outro span (outra fonte), por isso olhamos a linha inteira e não só o
 span. Se há mais padrões `�→` que provas, não sabemos quais são gancho e nada
 é trocado (desde 2026-11-26; antes bastava uma prova para trocar todos).
+
+Três formas do mesmo gancho no Markdown, conforme as fontes dos spans:
+- `�→`: gancho e seta na mesma fonte (ex.: LMMathItalic), sem separação de span;
+- `_�_ →`: o gancho fica em itálico e a seta vem depois, de outra fonte (CMSY10);
+- `→ _�_`: a seta vem antes do gancho na mesma linha (linha só com os dois glifos).
+As três viram `↪` sem itálico, porque a seta é de fonte reta. WHY: o span itálico
+do gancho fecha antes da seta de outra fonte, e por isso o `�→` contíguo nunca
+aparece nesse layout; o reparo casa a forma que o Markdown de fato produz.
 """
+import re
 from typing import Any
 
 import fitz
@@ -24,6 +33,9 @@ _CODIGO_HOOK = 0x2C
 _PREFIXO_FONTE_HOOK = "LMMathItalic"
 _SETA = "→"
 _HOOK_LINHA = "↪"  # ↪
+# As três formas do gancho no Markdown (ver docstring do módulo). Alternância
+# numa regex só: uma passada troca cada trecho no máximo uma vez.
+_PADRAO_HOOK = re.compile(r"�→|_�_ →|→ _�_")
 
 # (nome_da_fonte, código_bruto, proximo). proximo = caractere seguinte na mesma
 # linha da extração normal; "" só se for fim de linha. Desconhecido não é prova:
@@ -171,14 +183,20 @@ def _conta_hooks(glifos: list[Glifo]) -> int:
 
 def reparar_hook_linha(md: str, glifos: list[Glifo]) -> tuple[str, int]:
     """
-    Troca `�→` por ↪ só quando há uma prova de gancho para cada ocorrência.
+    Troca as três formas do gancho (`�→`, `_�_ →`, `→ _�_`) por ↪ só quando
+    há uma prova de gancho para cada ocorrência.
 
-    Prova por documento não basta: um único \\lhook faria todo `�→` virar ↪,
-    inclusive os de outras fontes. Então comparamos contagens:
-    - sem padrão `�→` ou sem gancho comprovado: texto intacto, 0;
+    Prova por documento não basta: um único \\lhook faria todo padrão virar ↪,
+    inclusive os de outras fontes. Então comparamos contagens, somando as três
+    formas:
+    - sem padrão ou sem gancho comprovado: texto intacto, 0;
     - padrões <= provas: todos viram ↪, devolve o número de padrões;
     - padrões > provas: nenhum é trocado, devolve (md, 0). Não dá para saber
       quais são gancho, e a regra do módulo é "sem prova, nada é trocado".
+
+    HOW: uma única passada com alternância (re.sub) em vez de três str.replace
+    em sequência. Assim cada trecho do Markdown é trocado no máximo uma vez, e a
+    contagem é a das trocas reais, não a soma de contagens que podem se sobrepor.
 
     Args:
         md: Markdown com possíveis U+FFFD.
@@ -187,11 +205,10 @@ def reparar_hook_linha(md: str, glifos: list[Glifo]) -> tuple[str, int]:
     Returns:
         (md_reparado, n_substituicoes)
     """
-    padrao = "�" + _SETA
-    n_padrao = md.count(padrao)
     n_hook = _conta_hooks(glifos)
-    if n_padrao == 0 or n_hook == 0:
+    if n_hook == 0:
         return md, 0
-    if n_padrao > n_hook:
+    n_padrao = len(_PADRAO_HOOK.findall(md))
+    if n_padrao == 0 or n_padrao > n_hook:
         return md, 0
-    return md.replace(padrao, _HOOK_LINHA), n_padrao
+    return _PADRAO_HOOK.sub(_HOOK_LINHA, md), n_padrao

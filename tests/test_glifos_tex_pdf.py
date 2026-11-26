@@ -31,7 +31,9 @@ def _stream(dados: bytes) -> bytes:
     return b"<< /Length %d >>\nstream\n" % len(dados) + dados + b"\nendstream"
 
 
-def _montar_pdf(base_font: str, seta_na_fonte_do_gancho: bool = False) -> bytes:
+def _montar_pdf(
+    base_font: str, seta_na_fonte_do_gancho: bool = False, texto_em_volta: bool = False
+) -> bytes:
     """
     Monta um PDF de uma página com xref calculado à mão.
 
@@ -43,13 +45,24 @@ def _montar_pdf(base_font: str, seta_na_fonte_do_gancho: bool = False) -> bytes:
     seta_na_fonte_do_gancho: a seta (0x41) vai na mesma fonte do gancho, em vez
     de CMSY10. HOW: é o layout em que o MuPDF junta `�→` num span só sem a
     flag CID e o separa com ela; o pareamento por span quebrava aqui.
+
+    texto_em_volta: só vale com a seta em CMSY10. Põe "Seja f: A " antes e
+    " B uma inclusao." depois, na mesma linha, como num parágrafo real.
     """
     if seta_na_fonte_do_gancho:
         conteudo = b"BT /F1 12 Tf 10 60 Td <2C41> Tj ET "
         codificacao_hook = b"<< /Type /Encoding /Differences [44 /lhookx 65 /arrowright] >>"
         ultimo_char = 65
     else:
-        conteudo = b"BT /F1 12 Tf 10 60 Td <2C> Tj /F2 12 Tf <41> Tj ET "
+        # HOW: texto Helvetica antes e depois, na mesma linha de base, como num
+        # parágrafo real; o caso isolado (sem texto) não reproduz a quebra de span.
+        if texto_em_volta:
+            conteudo = (
+                b"BT /F3 12 Tf 10 60 Td (Seja f: A ) Tj /F1 12 Tf <2C> Tj "
+                b"/F2 12 Tf <41> Tj /F3 12 Tf ( B uma inclusao.) Tj ET "
+            )
+        else:
+            conteudo = b"BT /F1 12 Tf 10 60 Td <2C> Tj /F2 12 Tf <41> Tj ET "
         codificacao_hook = b"<< /Type /Encoding /Differences [44 /lhookx] >>"
         ultimo_char = 44
     conteudo += b"BT /F3 12 Tf 10 30 Td (" + _TEXTO_APOIO + b") Tj ET"
@@ -169,3 +182,31 @@ def test_pdf_to_md_troca_gancho_por_hook_linha(pdf_gancho_seta_mesma_fonte: Path
     md = pdf_to_md(pdf_gancho_seta_mesma_fonte)
     assert "↪" in md
     assert "�→" not in md
+
+
+@pytest.fixture
+def pdf_cmsy10_texto_em_volta(tmp_path: Path) -> Path:
+    """Gancho LMMathItalic + seta CMSY10 com texto Helvetica antes e depois, na mesma linha."""
+    caminho = tmp_path / "cmsy10_texto_em_volta.pdf"
+    caminho.write_bytes(_montar_pdf("LMMathItalic10-Regular", texto_em_volta=True))
+    return caminho
+
+
+def test_pdf_to_md_cmsy10_isolado_troca_por_hook_linha(pdf_gancho: Path) -> None:
+    """Layout CMSY10 isolado: a seta de outra fonte vira `↪` sem `�` no Markdown."""
+    md = pdf_to_md(pdf_gancho)
+    assert "↪" in md
+    assert "�" not in md
+
+
+def test_pdf_to_md_cmsy10_com_texto_em_volta_troca_por_hook_linha(
+    pdf_cmsy10_texto_em_volta: Path,
+) -> None:
+    """Gancho no meio de frase com seta de CMSY10: sai `A ↪ B`, sem `�` e sem itálico.
+
+    Motivo: o span itálico do gancho fecha antes da seta, que vem de outra fonte.
+    Sem o reparo o Markdown sai como `A _�_ → B`, que não é `�→` e escapa do reparo antigo.
+    """
+    md = pdf_to_md(pdf_cmsy10_texto_em_volta)
+    assert "A ↪ B" in md
+    assert "�" not in md
