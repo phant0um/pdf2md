@@ -6,23 +6,31 @@ import fitz
 
 from core.glifos_tex import extrair_glifos_tex, reparar_hook_linha, tem_glifo_hook
 
-_HOOK = ("LMMathItalic6-Regular", 0x2C)
-_SOMA = ("LMMathExtension10-Regular", 0x58)
+# Cada glifo carrega (fonte, código, proximo): proximo é o caractere seguinte
+# na mesma linha da extração normal. Gancho só vale se proximo for "→".
+_HOOK = ("LMMathItalic6-Regular", 0x2C, "→")
+_HOOK_SEM_SETA = ("LMMathItalic6-Regular", 0x2C, "")
+_SOMA = ("LMMathExtension10-Regular", 0x58, "")
 
 
 def test_tem_glifo_hook_detecta_fonte_e_codigo():
-    """Só (LMMathItalic*, 0x2C) conta como gancho comprovado."""
+    """Só (LMMathItalic*, 0x2C, →) conta como gancho comprovado."""
     assert tem_glifo_hook([_HOOK])
 
 
 def test_tem_glifo_hook_recusa_codigo_diferente():
     """Mesma fonte com outro código não é gancho."""
-    assert not tem_glifo_hook([("LMMathItalic6-Regular", 0x2D)])
+    assert not tem_glifo_hook([("LMMathItalic6-Regular", 0x2D, "→")])
 
 
 def test_tem_glifo_hook_recusa_fonte_diferente():
     """Mesmo código em fonte que não é LMMathItalic não é gancho."""
-    assert not tem_glifo_hook([("txexs", 0x2C)])
+    assert not tem_glifo_hook([("txexs", 0x2C, "→")])
+
+
+def test_tem_glifo_hook_recusa_gancho_sem_seta():
+    """Gancho sem → logo depois não é prova: pode ser outro símbolo de fim de linha."""
+    assert not tem_glifo_hook([_HOOK_SEM_SETA])
 
 
 def test_reparar_hook_substitui_fffd_seta():
@@ -73,6 +81,20 @@ def test_reparar_hook_mais_padroes_que_provas_nao_troca_nenhum():
     assert n == 0
 
 
+def test_reparar_tres_ganchos_so_dois_com_seta_nao_troca_os_tres():
+    """Três ganchos, só dois seguidos de →, e um `�→` de outra fonte: não troca.
+
+    Motivo: contar ganchos sem olhar o caractere seguinte deixaria 3 provas
+    cobrir os 3 `�→`, inclusive o de fonte que não é gancho. Com 2 provas
+    válidas para 3 padrões, nenhum é trocado.
+    """
+    original = "�→ a �→ b �→ c"
+    glifos = [_HOOK, _HOOK, _HOOK_SEM_SETA]
+    md, n = reparar_hook_linha(original, glifos)
+    assert md == original
+    assert n == 0
+
+
 # --- Finding B: extrair_glifos_tex com documento fake (duck typing) ---
 
 
@@ -94,44 +116,60 @@ def _span(font: str, chars: list[str]) -> dict:
     return {"font": font, "chars": [{"c": c} for c in chars]}
 
 
-def _pagina_com_spans(spans_sem: list[dict], spans_com: list[dict]) -> _FakePagina:
-    """Monta página fake com um bloco de texto (type 0) por lista de spans."""
-    sem = {"blocks": [{"type": 0, "lines": [{"spans": spans_sem}]}]}
-    com = {"blocks": [{"type": 0, "lines": [{"spans": spans_com}]}]}
+def _pagina_com_linhas(linhas_sem: list[list[dict]], linhas_com: list[list[dict]]) -> _FakePagina:
+    """Monta página fake com um bloco de texto (type 0) por linha de spans."""
+    sem = {"blocks": [{"type": 0, "lines": [{"spans": s} for s in linhas_sem]}]}
+    com = {"blocks": [{"type": 0, "lines": [{"spans": s} for s in linhas_com]}]}
     return _FakePagina(sem, com)
 
 
+def _pagina_com_spans(spans_sem: list[dict], spans_com: list[dict]) -> _FakePagina:
+    """Atalho: todos os spans numa linha só."""
+    return _pagina_com_linhas([spans_sem], [spans_com])
+
+
 def test_extrair_glifos_pareia_fffd_com_codigo_bruto():
-    """U+FFFD na extração normal + código bruto na com-flag vira (fonte, código)."""
+    """U+FFFD na extração normal + código bruto na com-flag vira (fonte, código, proximo).
+
+    Sem caractere depois do U+FFFD na linha, proximo é "".
+    """
     pagina = _pagina_com_spans(
         [_span("LMMathItalic6-Regular", ["�"])],
         [_span("LMMathItalic6-Regular", [","])],
     )
-    assert extrair_glifos_tex([pagina]) == [("LMMathItalic6-Regular", 0x2C)]
+    assert extrair_glifos_tex([pagina]) == [("LMMathItalic6-Regular", 0x2C, "")]
 
 
-def test_extrair_glifos_pula_pagina_com_numero_de_spans_diferente():
-    """Spans em contagens diferentes: a página inteira é pulada."""
-    pagina = _pagina_com_spans(
-        [_span("txexs", ["�"]), _span("txexs", ["a"])],
-        [_span("txexs", [","])],
+def test_extrair_glifos_pula_pagina_com_numero_de_linhas_diferente():
+    """Contagem de linhas diferente entre as vistas: a página inteira é pulada.
+
+    Motivo: sem a mesma estrutura de linhas não há como alinhar as duas
+    extrações; a regra nova (pareamento por linha) só vale com linhas iguais.
+    """
+    pagina = _pagina_com_linhas(
+        [[_span("txexs", ["�"])], [_span("txexs", ["a"])]],
+        [[_span("txexs", [","])]],
     )
     assert extrair_glifos_tex([pagina]) == []
 
 
-def test_extrair_glifos_pula_span_com_contagem_de_chars_diferente():
-    """Char count divergente pula só aquele span; os outros continuam pareados."""
-    pagina = _pagina_com_spans(
+def test_extrair_glifos_linha_com_chars_diferentes_pula_so_a_linha():
+    """Contagem de chars divergente numa linha pula essa linha; as outras seguem pareadas.
+
+    Motivo: antes a regra era por span; agora é por linha. Um desalinhamento
+    numa linha não contamina as demais da página.
+    """
+    pagina = _pagina_com_linhas(
         [
-            _span("txexs", ["�", "a"]),
-            _span("LMMathItalic6-Regular", ["�"]),
+            [_span("txexs", ["�", "a"])],
+            [_span("LMMathItalic6-Regular", ["�"])],
         ],
         [
-            _span("txexs", [","]),
-            _span("LMMathItalic6-Regular", [","]),
+            [_span("txexs", [","])],
+            [_span("LMMathItalic6-Regular", [","])],
         ],
     )
-    assert extrair_glifos_tex([pagina]) == [("LMMathItalic6-Regular", 0x2C)]
+    assert extrair_glifos_tex([pagina]) == [("LMMathItalic6-Regular", 0x2C, "")]
 
 
 def test_extrair_glifos_ignora_blocos_que_nao_sao_texto():
@@ -156,3 +194,51 @@ def test_extrair_glifos_sem_fffd_devolve_lista_vazia():
         [_span("txexs", ["a", "b"])],
     )
     assert extrair_glifos_tex([pagina]) == []
+
+
+def test_extrair_proximo_seta_no_span_seguinte_da_mesma_linha():
+    """Seta num span de OUTRA fonte na mesma linha ainda é o proximo do gancho.
+
+    Motivo: em TeX a seta costuma vir em outra fonte logo depois do gancho.
+    """
+    pagina = _pagina_com_linhas(
+        [[_span("LMMathItalic6-Regular", ["�"]), _span("cmr10", ["→"])]],
+        [[_span("LMMathItalic6-Regular", [","]), _span("cmr10", ["→"])]],
+    )
+    assert extrair_glifos_tex([pagina]) == [("LMMathItalic6-Regular", 0x2C, "→")]
+
+
+def test_extrair_proximo_vazio_quando_seta_esta_na_linha_seguinte():
+    """Seta só na linha de baixo não conta: fim de linha é fronteira, proximo é ""."""
+    pagina = _pagina_com_linhas(
+        [[_span("LMMathItalic6-Regular", ["�"])], [_span("cmr10", ["→"])]],
+        [[_span("LMMathItalic6-Regular", [","])], [_span("cmr10", ["→"])]],
+    )
+    assert extrair_glifos_tex([pagina]) == [("LMMathItalic6-Regular", 0x2C, "")]
+
+
+def test_extrair_linha_com_chars_divergentes_nao_gera_glifo():
+    """Linha com contagem de chars diferente não gera glifo, nem o gancho dela.
+
+    Motivo: a regra mudou de span para linha. Antes o span seguinte divergente
+    virava proximo ""; agora a linha inteira fica sem pareamento, porque não
+    há como saber qual char de uma vista corresponde a qual da outra.
+    """
+    pagina = _pagina_com_linhas(
+        [[_span("LMMathItalic6-Regular", ["�"]), _span("cmr10", ["→", "b"])]],
+        [[_span("LMMathItalic6-Regular", [","]), _span("cmr10", [","])]],
+    )
+    assert extrair_glifos_tex([pagina]) == []
+
+
+def test_extrair_mesma_linha_com_split_diferente_entre_vistas_pareia():
+    """Mesma linha em 1 span (sem flag) e 2 spans (com flag): pareia por char, proximo "→".
+
+    Motivo: o MuPDF divide spans de forma diferente quando a flag CID muda o
+    texto de um glifo. O que as duas vistas têm em comum são os chars, não os spans.
+    """
+    pagina = _pagina_com_linhas(
+        [[_span("LMMathItalic6-Regular", ["�", "→"])]],
+        [[_span("LMMathItalic6-Regular", [","]), _span("cmr10", ["→"])]],
+    )
+    assert extrair_glifos_tex([pagina]) == [("LMMathItalic6-Regular", 0x2C, "→")]
