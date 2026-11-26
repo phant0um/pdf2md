@@ -11,6 +11,8 @@ código 0x2C = \\lhook) sempre vem antes de → (U+2192) e junto formam ↪. Só
 substituímos `�→` quando o próprio documento contém esse glifo — sem prova
 no documento, nada é trocado.
 """
+from typing import Any
+
 import fitz
 
 # Código do glifo \lhook na fonte LMMathItalic (verificado em PDF de origem).
@@ -56,7 +58,7 @@ def extrair_glifos_tex(doc: fitz.Document) -> list[tuple[str, int]]:
     return glifos
 
 
-def _spans_texto(pagina_dict: dict) -> list[dict]:
+def _spans_texto(pagina_dict: dict[str, Any]) -> list[dict[str, Any]]:
     """Achata os spans de texto (bloco tipo 0) de um dict rawdict."""
     return [
         span

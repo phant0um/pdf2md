@@ -434,3 +434,15 @@ def test_classificar_fffd_sublinhado_vizinho_nao_e_marcacao():
     """`_` ao lado de letra não torna corrupção de itálico em símbolo."""
     from core.quality import classificar_fffd
     assert classificar_fffd("_�ow_") == (1, 0)
+
+
+def test_classificar_fffd_parentese_antes_de_palavra_nao_e_formula():
+    """`(` antes de palavra é parêntese, então ligadura quebrada continua palavra."""
+    from core.quality import classificar_fffd
+    assert classificar_fffd("(�gure 3)") == (1, 0)
+
+
+def test_classificar_fffd_barra_de_tabela_nao_e_formula():
+    """`|` de célula de tabela markdown não esconde ligadura quebrada."""
+    from core.quality import classificar_fffd
+    assert classificar_fffd("|�eld|") == (1, 0)
